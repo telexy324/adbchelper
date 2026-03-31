@@ -8,8 +8,9 @@ use thiserror::Error;
 use crate::models::connection_profile::{
     ConnectionProfile, UpsertConnectionProfileInput, UpsertEnvironmentInput, ValidationResult,
 };
-use crate::models::environment::EnvironmentProfile;
 use crate::models::chat::{ChatMessage, ChatSession};
+use crate::models::environment::EnvironmentProfile;
+use crate::models::investigation::{InvestigationEvidence, InvestigationSummary};
 
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -93,6 +94,25 @@ pub fn initialize_database(base_dir: &Path) -> Result<DatabaseStatus, StorageErr
           request_json TEXT,
           status TEXT NOT NULL,
           created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS investigations (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          environment_id TEXT NOT NULL,
+          status TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY(environment_id) REFERENCES environments(id)
+        );
+        CREATE TABLE IF NOT EXISTS investigation_evidence (
+          id TEXT PRIMARY KEY,
+          investigation_id TEXT NOT NULL,
+          evidence_type TEXT NOT NULL,
+          title TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          content_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY(investigation_id) REFERENCES investigations(id)
         );
         "#
     )?;
@@ -660,4 +680,138 @@ pub fn insert_audit_log(
         ],
     )?;
     Ok(())
+}
+
+pub fn create_investigation(
+    connection: &Connection,
+    environment_id: &str,
+    title: &str,
+) -> Result<InvestigationSummary, rusqlite::Error> {
+    let now = Utc::now().to_rfc3339();
+    let investigation_id = uuid::Uuid::new_v4().to_string();
+    connection.execute(
+        r#"
+        INSERT INTO investigations (id, title, environment_id, status, created_at, updated_at)
+        VALUES (?1, ?2, ?3, 'active', ?4, ?4)
+        "#,
+        params![investigation_id, title, environment_id, now],
+    )?;
+
+    Ok(InvestigationSummary {
+        id: investigation_id,
+        title: title.to_string(),
+        environment_id: environment_id.to_string(),
+        status: "active".to_string(),
+        created_at: now.clone(),
+        updated_at: now,
+    })
+}
+
+pub fn touch_investigation(connection: &Connection, investigation_id: &str) -> Result<(), rusqlite::Error> {
+    connection.execute(
+        "UPDATE investigations SET updated_at = ?2 WHERE id = ?1",
+        params![investigation_id, Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
+}
+
+pub fn get_investigation(
+    connection: &Connection,
+    investigation_id: &str,
+) -> Result<Option<InvestigationSummary>, rusqlite::Error> {
+    let mut statement = connection.prepare(
+        "SELECT id, title, environment_id, status, created_at, updated_at FROM investigations WHERE id = ?1",
+    )?;
+    let mut rows = statement.query(params![investigation_id])?;
+    if let Some(row) = rows.next()? {
+        return Ok(Some(InvestigationSummary {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            environment_id: row.get(2)?,
+            status: row.get(3)?,
+            created_at: row.get(4)?,
+            updated_at: row.get(5)?,
+        }));
+    }
+
+    Ok(None)
+}
+
+pub fn list_investigations(connection: &Connection) -> Result<Vec<InvestigationSummary>, rusqlite::Error> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT id, title, environment_id, status, created_at, updated_at
+        FROM investigations
+        ORDER BY updated_at DESC
+        "#,
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(InvestigationSummary {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            environment_id: row.get(2)?,
+            status: row.get(3)?,
+            created_at: row.get(4)?,
+            updated_at: row.get(5)?,
+        })
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+}
+
+pub fn add_investigation_evidence(
+    connection: &Connection,
+    investigation_id: &str,
+    evidence_type: &str,
+    title: &str,
+    summary: &str,
+    content_json: &str,
+) -> Result<InvestigationEvidence, rusqlite::Error> {
+    let now = Utc::now().to_rfc3339();
+    let evidence_id = uuid::Uuid::new_v4().to_string();
+    connection.execute(
+        r#"
+        INSERT INTO investigation_evidence (
+          id, investigation_id, evidence_type, title, summary, content_json, created_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "#,
+        params![evidence_id, investigation_id, evidence_type, title, summary, content_json, now],
+    )?;
+
+    Ok(InvestigationEvidence {
+        id: evidence_id,
+        investigation_id: investigation_id.to_string(),
+        evidence_type: evidence_type.to_string(),
+        title: title.to_string(),
+        summary: summary.to_string(),
+        content_json: content_json.to_string(),
+        created_at: now,
+    })
+}
+
+pub fn list_investigation_evidence(
+    connection: &Connection,
+    investigation_id: &str,
+) -> Result<Vec<InvestigationEvidence>, rusqlite::Error> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT id, investigation_id, evidence_type, title, summary, content_json, created_at
+        FROM investigation_evidence
+        WHERE investigation_id = ?1
+        ORDER BY created_at DESC
+        "#,
+    )?;
+    let rows = statement.query_map(params![investigation_id], |row| {
+        Ok(InvestigationEvidence {
+            id: row.get(0)?,
+            investigation_id: row.get(1)?,
+            evidence_type: row.get(2)?,
+            title: row.get(3)?,
+            summary: row.get(4)?,
+            content_json: row.get(5)?,
+            created_at: row.get(6)?,
+        })
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>()
 }

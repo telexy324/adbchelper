@@ -118,6 +118,21 @@ fn ensure_session(connection: &Connection, input: &SendChatMessageInput) -> Resu
     db::create_chat_session(connection, &input.environment_id, &title).map_err(|error| error.to_string())
 }
 
+pub fn ensure_tool_session(
+    connection: &Connection,
+    session_id: &Option<String>,
+    environment_id: &str,
+    title: &str,
+) -> Result<ChatSession, String> {
+    if let Some(session_id) = session_id {
+        return db::get_chat_session(connection, session_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "Selected chat session no longer exists.".to_string());
+    }
+
+    db::create_chat_session(connection, environment_id, title).map_err(|error| error.to_string())
+}
+
 fn derive_title(content: &str) -> String {
     let trimmed = content.trim();
     if trimmed.is_empty() {

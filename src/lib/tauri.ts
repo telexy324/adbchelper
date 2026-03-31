@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppHealth,
+  AttachToolEvidenceInput,
   CompareNacosConfigInput,
   CompareNacosConfigResponse,
   ChatResponse,
@@ -8,8 +9,12 @@ import type {
   ChatSession,
   ConnectionProfile,
   EnvironmentProfile,
+  InvestigationEvidence,
+  InvestigationSaveResponse,
+  InvestigationSummary,
   LogSearchInput,
   LogSearchResponse,
+  SaveInvestigationInput,
   SendChatMessageInput,
   SshDiagnosticsInput,
   SshDiagnosticsResponse,
@@ -65,6 +70,26 @@ export async function listToolCatalog(): Promise<ToolDefinition[]> {
 
 export async function sendChatMessage(input: SendChatMessageInput): Promise<ChatResponse> {
   return invoke<ChatResponse>("send_chat_message", { input });
+}
+
+export async function attachToolEvidence(input: AttachToolEvidenceInput): Promise<ChatResponse> {
+  return invoke<ChatResponse>("attach_tool_evidence", { input });
+}
+
+export async function listInvestigations(): Promise<InvestigationSummary[]> {
+  return invoke<InvestigationSummary[]>("list_investigations");
+}
+
+export async function listInvestigationEvidence(
+  investigationId: string,
+): Promise<InvestigationEvidence[]> {
+  return invoke<InvestigationEvidence[]>("list_investigation_evidence", { investigationId });
+}
+
+export async function saveInvestigationEvidence(
+  input: SaveInvestigationInput,
+): Promise<InvestigationSaveResponse> {
+  return invoke<InvestigationSaveResponse>("save_investigation_evidence", { input });
 }
 
 export async function searchLogs(input: LogSearchInput): Promise<LogSearchResponse> {

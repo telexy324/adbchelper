@@ -48,3 +48,13 @@ pub struct SendChatMessageInput {
     pub environment_id: String,
     pub content: String,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachToolEvidenceInput {
+    pub session_id: Option<String>,
+    pub environment_id: String,
+    pub title: String,
+    pub tool_name: String,
+    pub content: String,
+}

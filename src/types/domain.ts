@@ -96,6 +96,14 @@ export interface SendChatMessageInput {
   content: string;
 }
 
+export interface AttachToolEvidenceInput {
+  sessionId?: string;
+  environmentId: string;
+  title: string;
+  toolName: string;
+  content: string;
+}
+
 export interface ChatResponse {
   session: ChatSession;
   messages: ChatMessage[];
@@ -231,6 +239,40 @@ export interface CompareNacosConfigResponse {
   target: NacosConfigVersion;
   diffEntries: NacosDiffEntry[];
   summary: NacosDiffSummary;
+}
+
+export interface InvestigationSummary {
+  id: string;
+  title: string;
+  environmentId: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InvestigationEvidence {
+  id: string;
+  investigationId: string;
+  evidenceType: string;
+  title: string;
+  summary: string;
+  contentJson: string;
+  createdAt: string;
+}
+
+export interface SaveInvestigationInput {
+  investigationId?: string;
+  title?: string;
+  environmentId: string;
+  evidenceType: string;
+  evidenceTitle: string;
+  summary: string;
+  contentJson: string;
+}
+
+export interface InvestigationSaveResponse {
+  investigation: InvestigationSummary;
+  evidence: InvestigationEvidence;
 }
 
 export interface AppHealth {

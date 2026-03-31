@@ -3,11 +3,21 @@ import { SectionCard } from "../../components/SectionCard";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
-import { compareNacosConfig, runSshDiagnostics, searchLogs } from "../../lib/tauri";
+import {
+  attachToolEvidence,
+  compareNacosConfig,
+  listChatSessions,
+  listInvestigations,
+  runSshDiagnostics,
+  saveInvestigationEvidence,
+  searchLogs,
+} from "../../lib/tauri";
 import type {
+  ChatSession,
   CompareNacosConfigInput,
   CompareNacosConfigResponse,
   EnvironmentProfile,
+  InvestigationSummary,
   LogSearchInput,
   LogSearchResponse,
   LogTimeRange,
@@ -55,12 +65,20 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
   const [logResults, setLogResults] = useState<LogSearchResponse | null>(null);
   const [sshResults, setSshResults] = useState<SshDiagnosticsResponse | null>(null);
   const [nacosResults, setNacosResults] = useState<CompareNacosConfigResponse | null>(null);
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [investigations, setInvestigations] = useState<InvestigationSummary[]>([]);
+  const [attachChatSessionId, setAttachChatSessionId] = useState<string>("new");
+  const [attachInvestigationId, setAttachInvestigationId] = useState<string>("new");
+  const [investigationTitle, setInvestigationTitle] = useState("Nacos drift investigation");
   const [logStatusMessage, setLogStatusMessage] = useState<string | null>(null);
   const [sshStatusMessage, setSshStatusMessage] = useState<string | null>(null);
   const [nacosStatusMessage, setNacosStatusMessage] = useState<string | null>(null);
+  const [attachStatusMessage, setAttachStatusMessage] = useState<string | null>(null);
   const [isLogLoading, setIsLogLoading] = useState(false);
   const [isSshLoading, setIsSshLoading] = useState(false);
   const [isNacosLoading, setIsNacosLoading] = useState(false);
+  const [isAttachingChat, setIsAttachingChat] = useState(false);
+  const [isAttachingInvestigation, setIsAttachingInvestigation] = useState(false);
 
   useEffect(() => {
     if (environments.length === 0) {
@@ -102,6 +120,10 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
       commandPreset: sshFilters.commandPreset,
       logPath: sshFilters.logPath,
     });
+  }, []);
+
+  useEffect(() => {
+    void refreshEvidenceTargets();
   }, []);
 
   async function runSearch(input: LogSearchInput) {
@@ -147,6 +169,75 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
       );
     } finally {
       setIsNacosLoading(false);
+    }
+  }
+
+  async function refreshEvidenceTargets() {
+    try {
+      const [sessions, savedInvestigations] = await Promise.all([
+        listChatSessions(),
+        listInvestigations(),
+      ]);
+      setChatSessions(sessions);
+      setInvestigations(savedInvestigations);
+    } catch {
+      // Keep the resource tools usable even if the evidence sidebars cannot refresh yet.
+    }
+  }
+
+  async function handleAttachToChat() {
+    if (!nacosResults) {
+      return;
+    }
+
+    setIsAttachingChat(true);
+    setAttachStatusMessage(null);
+    try {
+      const title = `Nacos drift ${nacosResults.dataId}`;
+      const response = await attachToolEvidence({
+        sessionId: attachChatSessionId === "new" ? undefined : attachChatSessionId,
+        environmentId: nacosResults.targetEnvironmentId,
+        title,
+        toolName: "compare_nacos_config",
+        content: formatNacosEvidenceMarkdown(nacosResults),
+      });
+      setAttachChatSessionId(response.session.id);
+      setAttachStatusMessage(`Attached drift evidence to chat session "${response.session.title}".`);
+      await refreshEvidenceTargets();
+    } catch (error) {
+      setAttachStatusMessage(error instanceof Error ? error.message : "Failed to attach drift to chat.");
+    } finally {
+      setIsAttachingChat(false);
+    }
+  }
+
+  async function handleAttachToInvestigation() {
+    if (!nacosResults) {
+      return;
+    }
+
+    setIsAttachingInvestigation(true);
+    setAttachStatusMessage(null);
+    try {
+      const response = await saveInvestigationEvidence({
+        investigationId: attachInvestigationId === "new" ? undefined : attachInvestigationId,
+        title: attachInvestigationId === "new" ? investigationTitle.trim() || "Nacos drift investigation" : undefined,
+        environmentId: nacosResults.targetEnvironmentId,
+        evidenceType: "nacos_diff",
+        evidenceTitle: `${nacosResults.dataId} drift`,
+        summary: nacosResults.summary.headline,
+        contentJson: JSON.stringify(nacosResults),
+      });
+      setAttachInvestigationId(response.investigation.id);
+      setInvestigationTitle(response.investigation.title);
+      setAttachStatusMessage(`Saved drift evidence to investigation "${response.investigation.title}".`);
+      await refreshEvidenceTargets();
+    } catch (error) {
+      setAttachStatusMessage(
+        error instanceof Error ? error.message : "Failed to attach drift to investigation.",
+      );
+    } finally {
+      setIsAttachingInvestigation(false);
     }
   }
 
@@ -549,40 +640,118 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
               <SimpleListCard title="Likely impact" items={nacosResults.summary.likelyImpact} />
               <SimpleListCard title="Explanation" items={nacosResults.summary.explanation} />
             </div>
-            <div className="grid gap-4 lg:grid-cols-2">
-              <ConfigPreviewCard title={nacosResults.source.environmentId} profile={nacosResults.source.profileName} value={nacosResults.source.value} />
-              <ConfigPreviewCard title={nacosResults.target.environmentId} profile={nacosResults.target.profileName} value={nacosResults.target.value} />
+            <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+              <div className="space-y-3">
+                <p className="text-sm font-semibold">Rich diff review</p>
+                {nacosResults.diffEntries.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No drift was detected for this config.</p>
+                ) : (
+                  nacosResults.diffEntries.map((entry) => (
+                    <article className="rounded-xl border bg-muted/20 p-4" key={`${entry.status}-${entry.key}`}>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge
+                          variant={
+                            entry.status === "changed"
+                              ? "warning"
+                              : entry.status === "removed"
+                                ? "danger"
+                                : entry.status === "added"
+                                  ? "success"
+                                  : "outline"
+                          }
+                        >
+                          {entry.status}
+                        </Badge>
+                        <span className="text-sm font-semibold">{entry.key}</span>
+                      </div>
+                      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                        <RichValuePane
+                          label={nacosResults.source.environmentId}
+                          value={entry.sourceValue}
+                          tone={entry.status === "removed" || entry.status === "changed" ? "source" : "neutral"}
+                        />
+                        <RichValuePane
+                          label={nacosResults.target.environmentId}
+                          value={entry.targetValue}
+                          tone={entry.status === "added" || entry.status === "changed" ? "target" : "neutral"}
+                        />
+                      </div>
+                    </article>
+                  ))
+                )}
+              </div>
+              <div className="space-y-4">
+                <ConfigPreviewCard
+                  title={nacosResults.source.environmentId}
+                  profile={nacosResults.source.profileName}
+                  value={nacosResults.source.value}
+                />
+                <ConfigPreviewCard
+                  title={nacosResults.target.environmentId}
+                  profile={nacosResults.target.profileName}
+                  value={nacosResults.target.value}
+                />
+              </div>
             </div>
             <div className="space-y-3">
-              <p className="text-sm font-semibold">Config drift</p>
-              {nacosResults.diffEntries.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No drift was detected for this config.</p>
-              ) : (
-                nacosResults.diffEntries.map((entry) => (
-                  <article className="rounded-xl border bg-muted/20 p-4" key={`${entry.status}-${entry.key}`}>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge
-                        variant={
-                          entry.status === "changed"
-                            ? "warning"
-                            : entry.status === "removed"
-                              ? "danger"
-                              : entry.status === "added"
-                                ? "success"
-                                : "outline"
-                        }
+              <p className="text-sm font-semibold">Attach config drift evidence</p>
+              <div className="grid gap-4 xl:grid-cols-2">
+                <div className="rounded-xl border bg-background/80 p-4">
+                  <div className="grid gap-4">
+                    <Field label="Chat session">
+                      <select
+                        className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                        value={attachChatSessionId}
+                        onChange={(event) => setAttachChatSessionId(event.target.value)}
                       >
-                        {entry.status}
-                      </Badge>
-                      <span className="text-sm font-semibold">{entry.key}</span>
-                    </div>
-                    <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                      <ValuePane label="Source" value={entry.sourceValue} />
-                      <ValuePane label="Target" value={entry.targetValue} />
-                    </div>
-                  </article>
-                ))
-              )}
+                        <option value="new">Create new session</option>
+                        {chatSessions
+                          .filter((session) => session.environmentId === nacosResults.targetEnvironmentId)
+                          .map((session) => (
+                            <option key={session.id} value={session.id}>
+                              {session.title}
+                            </option>
+                          ))}
+                      </select>
+                    </Field>
+                    <Button onClick={() => void handleAttachToChat()} disabled={isAttachingChat}>
+                      {isAttachingChat ? "Attaching..." : "Attach To Chat"}
+                    </Button>
+                  </div>
+                </div>
+                <div className="rounded-xl border bg-background/80 p-4">
+                  <div className="grid gap-4">
+                    <Field label="Investigation">
+                      <select
+                        className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
+                        value={attachInvestigationId}
+                        onChange={(event) => setAttachInvestigationId(event.target.value)}
+                      >
+                        <option value="new">Create new investigation</option>
+                        {investigations
+                          .filter((investigation) => investigation.environmentId === nacosResults.targetEnvironmentId)
+                          .map((investigation) => (
+                            <option key={investigation.id} value={investigation.id}>
+                              {investigation.title}
+                            </option>
+                          ))}
+                      </select>
+                    </Field>
+                    {attachInvestigationId === "new" ? (
+                      <Field label="New investigation title">
+                        <Input
+                          value={investigationTitle}
+                          onChange={(event) => setInvestigationTitle(event.target.value)}
+                        />
+                      </Field>
+                    ) : null}
+                    <Button onClick={() => void handleAttachToInvestigation()} disabled={isAttachingInvestigation}>
+                      {isAttachingInvestigation ? "Saving..." : "Attach To Investigation"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+              {attachStatusMessage ? <p className="text-sm text-muted-foreground">{attachStatusMessage}</p> : null}
             </div>
           </div>
         ) : null}
@@ -700,6 +869,54 @@ function ConfigPreviewCard({
       </pre>
     </div>
   );
+}
+
+function RichValuePane({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string | null;
+  tone: "source" | "target" | "neutral";
+}) {
+  const toneClass =
+    tone === "source"
+      ? "border-rose-200 bg-rose-50/60"
+      : tone === "target"
+        ? "border-emerald-200 bg-emerald-50/60"
+        : "border-border bg-background/70";
+
+  return (
+    <div className={`rounded-lg border p-3 ${toneClass}`}>
+      <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
+      <pre className="mt-2 whitespace-pre-wrap break-all text-xs leading-6 text-foreground">
+        {value ?? "(missing)"}
+      </pre>
+    </div>
+  );
+}
+
+function formatNacosEvidenceMarkdown(result: CompareNacosConfigResponse): string {
+  const topDiffs = result.diffEntries
+    .slice(0, 10)
+    .map(
+      (entry) =>
+        `- ${entry.key} [${entry.status}] source=${entry.sourceValue ?? "(missing)"} target=${entry.targetValue ?? "(missing)"}`,
+    )
+    .join("\n");
+
+  return [
+    `Nacos config drift attached for ${result.group}/${result.dataId}.`,
+    `Source: ${result.sourceEnvironmentId}`,
+    `Target: ${result.targetEnvironmentId}`,
+    result.namespaceId ? `Namespace: ${result.namespaceId}` : "Namespace: default",
+    "",
+    `Summary: ${result.summary.headline}`,
+    "",
+    "Top drift entries:",
+    topDiffs || "- No drift entries",
+  ].join("\n");
 }
 
 function ValuePane({ label, value }: { label: string; value: string | null }) {
