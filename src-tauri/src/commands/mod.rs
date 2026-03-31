@@ -1,3 +1,4 @@
+pub mod approvals;
 pub mod app;
 pub mod chat;
 pub mod investigations;

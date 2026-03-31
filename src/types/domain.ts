@@ -5,7 +5,37 @@ export type AppSection =
   | "chat"
   | "resources"
   | "investigations"
+  | "approvals"
   | "settings";
+
+export type ApprovalActionType = "restart_pod" | "scale_deployment" | "reload_nginx";
+
+export interface ApprovalRequest {
+  id: string;
+  environmentId: string;
+  actionType: string;
+  targetRef: string;
+  status: string;
+  riskLevel: string;
+  rationale: string;
+  rollbackHint: string;
+  executionSummary: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateApprovalInput {
+  environmentId: string;
+  actionType: ApprovalActionType;
+  targetRef: string;
+  targetDetailsJson: string;
+  rationale: string;
+  rollbackHint?: string;
+}
+
+export interface ExecuteApprovalInput {
+  approvalId: string;
+}
 
 export type EnvironmentKind = "dev" | "test" | "prod";
 export type ConnectionProfileType = "kubernetes" | "elk" | "ssh" | "nacos" | "redis" | "qwen";

@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppHealth,
+  ApprovalRequest,
+  CreateApprovalInput,
+  ExecuteApprovalInput,
   AttachToolEvidenceInput,
   CompareNacosConfigInput,
   CompareNacosConfigResponse,
@@ -34,6 +37,24 @@ import type {
 
 export async function getAppHealth(): Promise<AppHealth> {
   return invoke<AppHealth>("get_app_health");
+}
+
+export async function listApprovalRequests(): Promise<ApprovalRequest[]> {
+  return invoke<ApprovalRequest[]>("list_approval_requests");
+}
+
+export async function createApprovalRequest(input: CreateApprovalInput): Promise<ApprovalRequest> {
+  return invoke<ApprovalRequest>("create_approval_request", { input });
+}
+
+export async function approveRequest(approvalId: string): Promise<ApprovalRequest> {
+  return invoke<ApprovalRequest>("approve_request", { approvalId });
+}
+
+export async function executeApprovalRequest(
+  input: ExecuteApprovalInput,
+): Promise<ApprovalRequest> {
+  return invoke<ApprovalRequest>("execute_approval_request", { input });
 }
 
 export async function listEnvironments(): Promise<EnvironmentProfile[]> {

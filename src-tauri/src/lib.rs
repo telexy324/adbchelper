@@ -43,6 +43,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::approvals::list_approval_requests,
+            commands::approvals::create_approval_request,
+            commands::approvals::approve_request,
+            commands::approvals::execute_approval_request,
             commands::app::get_app_health,
             commands::app::list_environments,
             commands::chat::list_chat_sessions,

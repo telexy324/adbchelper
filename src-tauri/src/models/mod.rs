@@ -1,3 +1,4 @@
+pub mod approval;
 pub mod app_health;
 pub mod chat;
 pub mod connection_profile;

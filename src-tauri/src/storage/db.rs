@@ -9,6 +9,7 @@ use crate::models::connection_profile::{
     ConnectionProfile, UpsertConnectionProfileInput, UpsertEnvironmentInput, ValidationResult,
 };
 use crate::models::chat::{ChatMessage, ChatSession};
+use crate::models::approval::ApprovalRequest;
 use crate::models::environment::EnvironmentProfile;
 use crate::models::investigation::{InvestigationEvidence, InvestigationSummary};
 
@@ -113,6 +114,21 @@ pub fn initialize_database(base_dir: &Path) -> Result<DatabaseStatus, StorageErr
           content_json TEXT NOT NULL,
           created_at TEXT NOT NULL,
           FOREIGN KEY(investigation_id) REFERENCES investigations(id)
+        );
+        CREATE TABLE IF NOT EXISTS approval_requests (
+          id TEXT PRIMARY KEY,
+          environment_id TEXT NOT NULL,
+          action_type TEXT NOT NULL,
+          target_ref TEXT NOT NULL,
+          target_details_json TEXT NOT NULL,
+          status TEXT NOT NULL,
+          risk_level TEXT NOT NULL,
+          rationale TEXT NOT NULL,
+          rollback_hint TEXT NOT NULL,
+          execution_summary TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY(environment_id) REFERENCES environments(id)
         );
         "#
     )?;
@@ -814,4 +830,123 @@ pub fn list_investigation_evidence(
     })?;
 
     rows.collect::<Result<Vec<_>, _>>()
+}
+
+pub fn create_approval_request(
+    connection: &Connection,
+    environment_id: &str,
+    action_type: &str,
+    target_ref: &str,
+    target_details_json: &str,
+    risk_level: &str,
+    rationale: &str,
+    rollback_hint: &str,
+) -> Result<ApprovalRequest, rusqlite::Error> {
+    let now = Utc::now().to_rfc3339();
+    let approval_id = uuid::Uuid::new_v4().to_string();
+    connection.execute(
+        r#"
+        INSERT INTO approval_requests (
+          id, environment_id, action_type, target_ref, target_details_json, status, risk_level, rationale, rollback_hint, execution_summary, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7, ?8, NULL, ?9, ?9)
+        "#,
+        params![
+            approval_id,
+            environment_id,
+            action_type,
+            target_ref,
+            target_details_json,
+            risk_level,
+            rationale,
+            rollback_hint,
+            now
+        ],
+    )?;
+
+    Ok(ApprovalRequest {
+        id: approval_id,
+        environment_id: environment_id.to_string(),
+        action_type: action_type.to_string(),
+        target_ref: target_ref.to_string(),
+        status: "pending".to_string(),
+        risk_level: risk_level.to_string(),
+        rationale: rationale.to_string(),
+        rollback_hint: rollback_hint.to_string(),
+        execution_summary: None,
+        created_at: now.clone(),
+        updated_at: now,
+    })
+}
+
+pub fn list_approval_requests(connection: &Connection) -> Result<Vec<ApprovalRequest>, rusqlite::Error> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT id, environment_id, action_type, target_ref, status, risk_level, rationale, rollback_hint, execution_summary, created_at, updated_at
+        FROM approval_requests
+        ORDER BY updated_at DESC
+        "#,
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(ApprovalRequest {
+            id: row.get(0)?,
+            environment_id: row.get(1)?,
+            action_type: row.get(2)?,
+            target_ref: row.get(3)?,
+            status: row.get(4)?,
+            risk_level: row.get(5)?,
+            rationale: row.get(6)?,
+            rollback_hint: row.get(7)?,
+            execution_summary: row.get(8)?,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
+        })
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>()
+}
+
+pub fn get_approval_request(
+    connection: &Connection,
+    approval_id: &str,
+) -> Result<Option<(ApprovalRequest, String)>, rusqlite::Error> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT id, environment_id, action_type, target_ref, target_details_json, status, risk_level, rationale, rollback_hint, execution_summary, created_at, updated_at
+        FROM approval_requests
+        WHERE id = ?1
+        "#,
+    )?;
+    let mut rows = statement.query(params![approval_id])?;
+    if let Some(row) = rows.next()? {
+        return Ok(Some((
+            ApprovalRequest {
+                id: row.get(0)?,
+                environment_id: row.get(1)?,
+                action_type: row.get(2)?,
+                target_ref: row.get(3)?,
+                status: row.get(5)?,
+                risk_level: row.get(6)?,
+                rationale: row.get(7)?,
+                rollback_hint: row.get(8)?,
+                execution_summary: row.get(9)?,
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
+            },
+            row.get(4)?,
+        )));
+    }
+    Ok(None)
+}
+
+pub fn update_approval_status(
+    connection: &Connection,
+    approval_id: &str,
+    status: &str,
+    execution_summary: Option<&str>,
+) -> Result<(), rusqlite::Error> {
+    connection.execute(
+        "UPDATE approval_requests SET status = ?2, execution_summary = COALESCE(?3, execution_summary), updated_at = ?4 WHERE id = ?1",
+        params![approval_id, status, execution_summary, Utc::now().to_rfc3339()],
+    )?;
+    Ok(())
 }

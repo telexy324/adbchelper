@@ -7,7 +7,9 @@ import {
   LayoutDashboard,
   ServerCog,
   ShieldCheck,
+  ShieldEllipsis,
 } from "lucide-react";
+import { ApprovalsPage } from "./features/approvals/ApprovalsPage";
 import { ChatPage } from "./features/chat/ChatPage";
 import { InvestigationsPage } from "./features/investigations/InvestigationsPage";
 import { ResourcesPage } from "./features/resources/ResourcesPage";
@@ -47,6 +49,12 @@ const navigationItems: NavigationItem[] = [
     label: "Investigations",
     description: "Timeline and reports",
     icon: ClipboardList,
+  },
+  {
+    id: "approvals",
+    label: "Approvals",
+    description: "Controlled operations",
+    icon: ShieldEllipsis,
   },
   {
     id: "settings",
@@ -175,6 +183,7 @@ export function App() {
             {activeSection === "chat" ? <ChatPage /> : null}
             {activeSection === "resources" ? <ResourcesPage environments={environments} /> : null}
             {activeSection === "investigations" ? <InvestigationsPage /> : null}
+            {activeSection === "approvals" ? <ApprovalsPage environments={environments} /> : null}
             {activeSection === "settings" ? (
               <SettingsPage appHealth={appHealth} environments={environments} onRefreshEnvironments={bootstrap} />
             ) : null}
