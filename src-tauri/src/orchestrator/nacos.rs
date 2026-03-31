@@ -5,6 +5,7 @@ use reqwest::Client;
 use serde_json::Value;
 
 use crate::models::connection_profile::ConnectionProfile;
+use crate::hardening::{sanitize_and_mask_text, sanitize_untrusted_text};
 use crate::models::nacos::{
     CompareNacosConfigInput, CompareNacosConfigResponse, NacosConfigVersion, NacosDiffEntry,
     NacosDiffSummary,
@@ -72,7 +73,10 @@ async fn fetch_config(
     namespace_id: Option<&str>,
 ) -> Result<LoadedConfig, String> {
     let config = parse_profile_config(profile)?;
-    let client = Client::new();
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|error| format!("Failed to build Nacos HTTP client: {error}"))?;
     let mut request = client
         .get(config.resolve_url(&profile.endpoint))
         .query(&[
@@ -83,11 +87,7 @@ async fn fetch_config(
 
     request = apply_auth(request, profile, &config).await?;
 
-    let response = request
-        .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
-        .send()
-        .await
-        .map_err(|error| format!("Nacos request failed for {}: {error}", profile.name))?;
+    let response = send_with_retry(request.header(CONTENT_TYPE, "application/x-www-form-urlencoded"), &profile.name).await?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -96,7 +96,7 @@ async fn fetch_config(
             "Nacos request failed for {} with status {}: {}",
             profile.name,
             status,
-            body.trim()
+            sanitize_and_mask_text(body.trim())
         ));
     }
 
@@ -110,14 +110,16 @@ async fn fetch_config(
             .and_then(Value::as_str)
             .ok_or_else(|| format!("Nacos v2 response missing data field for {}", profile.name))?;
         Ok(LoadedConfig {
-            value: value.to_string(),
+            value: sanitize_untrusted_text(value),
         })
     } else {
         let body = response
             .text()
             .await
             .map_err(|error| format!("Invalid Nacos v1 response for {}: {error}", profile.name))?;
-        Ok(LoadedConfig { value: body })
+        Ok(LoadedConfig {
+            value: sanitize_untrusted_text(&body),
+        })
     }
 }
 
@@ -330,6 +332,23 @@ fn is_high_risk_key(key: &str) -> bool {
     ]
     .iter()
     .any(|needle| lower.contains(needle))
+}
+
+async fn send_with_retry(
+    request: reqwest::RequestBuilder,
+    profile_name: &str,
+) -> Result<reqwest::Response, String> {
+    let cloned = request
+        .try_clone()
+        .ok_or_else(|| format!("Failed to clone request for {}.", profile_name))?;
+
+    match request.send().await {
+        Ok(response) => Ok(response),
+        Err(first_error) => cloned
+            .send()
+            .await
+            .map_err(|second_error| format!("Nacos request failed for {}: {} / retry: {}", profile_name, first_error, second_error)),
+    }
 }
 
 struct NacosProfileConfig {

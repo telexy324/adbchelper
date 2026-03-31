@@ -1,4 +1,5 @@
 mod commands;
+mod hardening;
 mod llm;
 mod models;
 mod orchestrator;

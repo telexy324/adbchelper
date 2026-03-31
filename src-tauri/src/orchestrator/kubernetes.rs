@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
 
 use rusqlite::Connection;
 use serde::Deserialize;
@@ -10,6 +11,7 @@ use crate::models::connection_profile::ConnectionProfile;
 use crate::models::kubernetes::{
     KubernetesEvent, KubernetesEventsSummary, ListKubernetesEventsInput, ListKubernetesEventsResponse,
 };
+use crate::hardening::{run_command_with_timeout, sanitize_and_mask_text};
 use crate::storage::db;
 
 pub fn list_events(
@@ -68,12 +70,10 @@ fn fetch_events(
         .arg("-o")
         .arg("json");
 
-    let output = command
-        .output()
-        .map_err(|error| format!("Failed to execute kubectl: {error}"))?;
+    let output = run_command_with_timeout(&mut command, Duration::from_secs(8), "kubectl get events")?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stderr = sanitize_and_mask_text(String::from_utf8_lossy(&output.stderr).trim());
         return Err(if stderr.is_empty() {
             format!("kubectl get events failed with status {}.", output.status)
         } else {
@@ -101,7 +101,7 @@ fn fetch_events(
             let name = item.involved_object.name.unwrap_or_else(|| "unknown".to_string());
             let kind = item.involved_object.kind.unwrap_or_else(|| "Unknown".to_string());
             let reason = item.reason.unwrap_or_else(|| "Unknown".to_string());
-            let message = item.message.unwrap_or_default();
+            let message = sanitize_and_mask_text(&item.message.unwrap_or_default());
             let timestamp = item
                 .event_time
                 .or(item.last_timestamp)

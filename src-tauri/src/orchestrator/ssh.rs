@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
 
 use chrono::Utc;
 use rusqlite::Connection;
@@ -9,6 +10,7 @@ use crate::models::connection_profile::ConnectionProfile;
 use crate::models::ssh::{
     SshDiagnosticsInput, SshDiagnosticsResponse, SshHealthMetric, SshLogLine,
 };
+use crate::hardening::{run_command_with_timeout, sanitize_and_mask_text};
 use crate::storage::{db, secrets};
 
 const COMMAND_PRESETS: [(&str, &str); 4] = [
@@ -38,8 +40,9 @@ pub fn run_diagnostics(
     let remote_command = resolve_command(&input.command_preset, input.log_path.as_deref())?;
     let execution = execute_ssh_command(&ssh_config, &remote_command, secret.as_deref())?;
     let target_host = ssh_config.render_target();
-    let health_summary = parse_health_summary(&input.command_preset, &target_host, &execution.stdout);
-    let log_lines = parse_log_lines(&input.command_preset, &execution.stdout);
+    let safe_stdout = sanitize_and_mask_text(&execution.stdout);
+    let health_summary = parse_health_summary(&input.command_preset, &target_host, &safe_stdout);
+    let log_lines = parse_log_lines(&input.command_preset, &safe_stdout);
     let recommended_actions = build_recommendations(&input.command_preset, &health_summary);
     let summary_headline = build_summary(&target_host, &input.command_preset, &health_summary, &log_lines);
 
@@ -493,12 +496,10 @@ fn execute_ssh_command(
     command.arg(config.render_target());
     command.arg(remote_command);
 
-    let output = command
-        .output()
-        .map_err(|error| format!("Failed to execute local ssh client: {error}"))?;
+    let output = run_command_with_timeout(&mut command, Duration::from_secs(8), "ssh diagnostics")?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stderr = sanitize_and_mask_text(String::from_utf8_lossy(&output.stderr).trim());
         return Err(if stderr.is_empty() {
             format!("SSH command failed with status {}.", output.status)
         } else {
@@ -507,7 +508,7 @@ fn execute_ssh_command(
     }
 
     Ok(SshExecution {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stdout: sanitize_and_mask_text(&String::from_utf8_lossy(&output.stdout)),
     })
 }
 

@@ -1,6 +1,7 @@
 use rusqlite::Connection;
 use tauri::State;
 
+use crate::hardening::{sanitize_and_mask_json, sanitize_and_mask_text};
 use crate::models::investigation::{
     InvestigationCorrelation, InvestigationDetail, InvestigationEvidence, InvestigationReport,
     InvestigationReportInput, InvestigationSaveResponse, InvestigationSummary,
@@ -78,8 +79,8 @@ pub fn save_investigation_evidence(
         &investigation.id,
         &input.evidence_type,
         &input.evidence_title,
-        &input.summary,
-        &input.content_json,
+        &sanitize_and_mask_text(&input.summary),
+        &sanitize_and_mask_json(&input.content_json),
     )
     .map_err(|error| error.to_string())?;
 
@@ -173,7 +174,11 @@ fn build_markdown_report(
             .map(|item| {
                 format!(
                     "### {}\n- Type: {}\n- Created: {}\n- Summary: {}\n\n```json\n{}\n```",
-                    item.title, item.evidence_type, item.created_at, item.summary, pretty_json(&item.content_json)
+                    sanitize_and_mask_text(&item.title),
+                    sanitize_and_mask_text(&item.evidence_type),
+                    item.created_at,
+                    sanitize_and_mask_text(&item.summary),
+                    pretty_json(&item.content_json)
                 )
             })
             .collect::<Vec<_>>()
@@ -185,7 +190,7 @@ fn build_markdown_report(
     } else {
         timeline
             .iter()
-            .map(|event| format!("- {} · {} · {}", event.timestamp, event.source_type, event.title))
+            .map(|event| format!("- {} · {} · {}", event.timestamp, sanitize_and_mask_text(&event.source_type), sanitize_and_mask_text(&event.title)))
             .collect::<Vec<_>>()
             .join("\n")
     };
@@ -195,7 +200,7 @@ fn build_markdown_report(
     } else {
         correlations
             .iter()
-            .map(|item| format!("- [{}] {}: {}", item.confidence, item.title, item.detail))
+            .map(|item| format!("- [{}] {}: {}", sanitize_and_mask_text(&item.confidence), sanitize_and_mask_text(&item.title), sanitize_and_mask_text(&item.detail)))
             .collect::<Vec<_>>()
             .join("\n")
     };
@@ -204,7 +209,7 @@ fn build_markdown_report(
         "# {title}\n\n## Summary\n- Environment: {environment}\n- Status: {status}\n- Created: {created}\n- Updated: {updated}\n- Evidence count: {evidence_count}\n\n## Timeline\n{timeline}\n\n## Cross-Source Correlation\n{correlations}\n\n## Evidence\n{evidence}\n",
         title = investigation.title,
         environment = investigation.environment_id,
-        status = investigation.status,
+        status = sanitize_and_mask_text(&investigation.status),
         created = investigation.created_at,
         updated = investigation.updated_at,
         evidence_count = evidence.len(),
@@ -229,8 +234,8 @@ fn build_html_report(
                 format!(
                     "<li><strong>{}</strong> <span>{}</span><div>{}</div></li>",
                     escape_html(&event.timestamp),
-                    escape_html(&event.title),
-                    escape_html(&event.detail)
+                    escape_html(&sanitize_and_mask_text(&event.title)),
+                    escape_html(&sanitize_and_mask_text(&event.detail))
                 )
             })
             .collect::<Vec<_>>()
@@ -246,7 +251,7 @@ fn build_html_report(
                 format!(
                     "<section class=\"evidence\"><h3>{}</h3><p>{}</p><pre>{}</pre></section>",
                     escape_html(&item.title),
-                    escape_html(&item.summary),
+                    escape_html(&sanitize_and_mask_text(&item.summary)),
                     escape_html(&pretty_json(&item.content_json))
                 )
             })
@@ -263,8 +268,8 @@ fn build_html_report(
                 format!(
                     "<section class=\"card\"><h3>{}</h3><p><strong>{}</strong></p><p>{}</p></section>",
                     escape_html(&item.title),
-                    escape_html(&item.confidence),
-                    escape_html(&item.detail)
+                    escape_html(&sanitize_and_mask_text(&item.confidence)),
+                    escape_html(&sanitize_and_mask_text(&item.detail))
                 )
             })
             .collect::<Vec<_>>()

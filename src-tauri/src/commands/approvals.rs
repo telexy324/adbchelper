@@ -1,10 +1,12 @@
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
 
 use rusqlite::Connection;
 use serde_json::Value;
 use tauri::State;
 
+use crate::hardening::{run_command_with_timeout, sanitize_and_mask_text};
 use crate::models::approval::{ApprovalRequest, CreateApprovalInput, ExecuteApprovalInput};
 use crate::storage::db;
 use crate::AppState;
@@ -26,6 +28,7 @@ pub fn create_approval_request(
 ) -> Result<ApprovalRequest, String> {
     let connection = open_connection(&state.storage_path)?;
     let risk_level = classify_risk(&input.environment_id, &input.action_type);
+    validate_production_safety(&input.environment_id, &input.action_type, &input.rationale, &input.target_details_json)?;
     let rollback_hint = input
         .rollback_hint
         .as_deref()
@@ -183,9 +186,7 @@ fn execute_restart_pod(
     let mut command = Command::new("kubectl");
     config.apply(&mut command)?;
     command.arg("delete").arg("pod").arg(&pod).arg("-n").arg(&namespace);
-    let output = command
-        .output()
-        .map_err(|error| format!("Failed to execute kubectl: {error}"))?;
+    let output = run_command_with_timeout(&mut command, Duration::from_secs(10), "kubectl delete pod")?;
     if !output.status.success() {
         return Err(command_error("kubectl delete pod", &output));
     }
@@ -194,7 +195,7 @@ fn execute_restart_pod(
         "Restarted pod {} in namespace {}. {}",
         pod,
         namespace,
-        String::from_utf8_lossy(&output.stdout).trim()
+        sanitize_and_mask_text(String::from_utf8_lossy(&output.stdout).trim())
     ))
 }
 
@@ -221,9 +222,7 @@ fn execute_scale_deployment(
         .arg("-n")
         .arg(&namespace)
         .arg(format!("--replicas={replicas}"));
-    let output = command
-        .output()
-        .map_err(|error| format!("Failed to execute kubectl: {error}"))?;
+    let output = run_command_with_timeout(&mut command, Duration::from_secs(10), "kubectl scale deployment")?;
     if !output.status.success() {
         return Err(command_error("kubectl scale deployment", &output));
     }
@@ -233,7 +232,7 @@ fn execute_scale_deployment(
         deployment,
         namespace,
         replicas,
-        String::from_utf8_lossy(&output.stdout).trim()
+        sanitize_and_mask_text(String::from_utf8_lossy(&output.stdout).trim())
     ))
 }
 
@@ -249,9 +248,7 @@ fn execute_reload_nginx(
     ssh.apply(&mut command)?;
     command.arg(ssh.render_target());
     command.arg("nginx -s reload || systemctl reload nginx || sudo systemctl reload nginx");
-    let output = command
-        .output()
-        .map_err(|error| format!("Failed to execute ssh: {error}"))?;
+    let output = run_command_with_timeout(&mut command, Duration::from_secs(10), "ssh reload nginx")?;
     if !output.status.success() {
         return Err(command_error("ssh reload nginx", &output));
     }
@@ -259,7 +256,7 @@ fn execute_reload_nginx(
     Ok(format!(
         "Reloaded Nginx on {}. {}",
         ssh.render_target(),
-        String::from_utf8_lossy(&output.stdout).trim()
+        sanitize_and_mask_text(String::from_utf8_lossy(&output.stdout).trim())
     ))
 }
 
@@ -286,7 +283,7 @@ fn required_string(target_details: &Value, key: &str) -> Result<String, String> 
 }
 
 fn command_error(prefix: &str, output: &std::process::Output) -> String {
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stderr = sanitize_and_mask_text(String::from_utf8_lossy(&output.stderr).trim());
     if stderr.is_empty() {
         format!("{} failed with status {}.", prefix, output.status)
     } else {
@@ -389,4 +386,37 @@ fn parse_host_and_port(endpoint: &str) -> Result<(String, Option<u16>), String> 
         }
     }
     Ok((endpoint.to_string(), None))
+}
+
+fn validate_production_safety(
+    environment_id: &str,
+    action_type: &str,
+    rationale: &str,
+    target_details_json: &str,
+) -> Result<(), String> {
+    if environment_id != "prod" {
+        return Ok(());
+    }
+
+    if rationale.trim().len() < 12 {
+        return Err("Production approval requests require a more specific rationale.".to_string());
+    }
+
+    let details = serde_json::from_str::<Value>(target_details_json)
+        .map_err(|error| format!("Invalid approval target details: {error}"))?;
+
+    if action_type == "scale_deployment" {
+        let replicas = details
+            .get("replicas")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| "Production scale requests must include a replica count.".to_string())?;
+        if replicas == 0 {
+            return Err("Scaling a production deployment to 0 is blocked by safety policy.".to_string());
+        }
+        if replicas > 20 {
+            return Err("Scaling a production deployment above 20 replicas is blocked by safety policy.".to_string());
+        }
+    }
+
+    Ok(())
 }
