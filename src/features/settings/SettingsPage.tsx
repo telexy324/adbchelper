@@ -378,6 +378,13 @@ export function SettingsPage({
                   setProfileDraft((current) => ({ ...current, configJson: event.target.value }))
                 }
               />
+              {profileDraft.profileType === "ssh" ? (
+                <p className="text-xs leading-5 text-muted-foreground">
+                  SSH supports <code>{"{\"authMode\":\"agent\"}"}</code> or{" "}
+                  <code>{"{\"authMode\":\"key\",\"privateKeyPath\":\"~/.ssh/id_ed25519\",\"port\":22}"}</code>.
+                  Password auth is not wired yet in execution mode.
+                </p>
+              ) : null}
             </Field>
             <Field label="Notes">
               <Textarea

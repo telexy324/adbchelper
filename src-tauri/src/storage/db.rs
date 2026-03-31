@@ -434,6 +434,23 @@ pub fn validate_connection_profile(input: &UpsertConnectionProfileInput) -> Vali
         messages.push("SSH profiles require a host or host:port endpoint.".to_string());
     }
 
+    if input.profile_type == "ssh" {
+        if let Some(config_json) = &input.config_json {
+            if let Ok(config) = serde_json::from_str::<serde_json::Value>(config_json) {
+                if let Some(auth_mode) = config.get("authMode").and_then(serde_json::Value::as_str) {
+                    if !matches!(auth_mode, "agent" | "key" | "password") {
+                        messages.push("SSH authMode must be one of agent, key, or password.".to_string());
+                    }
+                }
+                if let Some(private_key_path) = config.get("privateKeyPath").and_then(serde_json::Value::as_str) {
+                    if private_key_path.trim().is_empty() {
+                        messages.push("SSH privateKeyPath cannot be empty when provided.".to_string());
+                    }
+                }
+            }
+        }
+    }
+
     if let Some(config_json) = &input.config_json {
         if !config_json.trim().is_empty() && serde_json::from_str::<serde_json::Value>(config_json).is_err() {
             messages.push("Extra JSON must be valid JSON.".to_string());
