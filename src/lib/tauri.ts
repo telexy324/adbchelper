@@ -9,7 +9,10 @@ import type {
   ChatSession,
   ConnectionProfile,
   EnvironmentProfile,
+  InvestigationDetail,
   InvestigationEvidence,
+  InvestigationReport,
+  InvestigationReportInput,
   InvestigationSaveResponse,
   InvestigationSummary,
   LogSearchInput,
@@ -86,10 +89,22 @@ export async function listInvestigationEvidence(
   return invoke<InvestigationEvidence[]>("list_investigation_evidence", { investigationId });
 }
 
+export async function getInvestigationDetail(
+  investigationId: string,
+): Promise<InvestigationDetail> {
+  return invoke<InvestigationDetail>("get_investigation_detail", { investigationId });
+}
+
 export async function saveInvestigationEvidence(
   input: SaveInvestigationInput,
 ): Promise<InvestigationSaveResponse> {
   return invoke<InvestigationSaveResponse>("save_investigation_evidence", { input });
+}
+
+export async function generateInvestigationReport(
+  input: InvestigationReportInput,
+): Promise<InvestigationReport> {
+  return invoke<InvestigationReport>("generate_investigation_report", { input });
 }
 
 export async function searchLogs(input: LogSearchInput): Promise<LogSearchResponse> {

@@ -51,6 +51,8 @@ pub fn run() {
             commands::chat::attach_tool_evidence,
             commands::investigations::list_investigations,
             commands::investigations::list_investigation_evidence,
+            commands::investigations::get_investigation_detail,
+            commands::investigations::generate_investigation_report,
             commands::investigations::save_investigation_evidence,
             commands::chat::send_chat_message,
             commands::logs::search_logs,

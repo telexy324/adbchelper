@@ -275,6 +275,30 @@ export interface InvestigationSaveResponse {
   evidence: InvestigationEvidence;
 }
 
+export interface InvestigationTimelineEvent {
+  id: string;
+  timestamp: string;
+  title: string;
+  detail: string;
+  sourceType: string;
+}
+
+export interface InvestigationDetail {
+  investigation: InvestigationSummary;
+  evidence: InvestigationEvidence[];
+  timeline: InvestigationTimelineEvent[];
+}
+
+export interface InvestigationReportInput {
+  investigationId: string;
+}
+
+export interface InvestigationReport {
+  investigation: InvestigationSummary;
+  markdown: string;
+  html: string;
+}
+
 export interface AppHealth {
   appName: string;
   version: string;
