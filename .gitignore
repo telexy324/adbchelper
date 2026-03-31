@@ -1,0 +1,48 @@
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Node / frontend build artifacts
+node_modules/
+dist/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Rust / Tauri build artifacts
+src-tauri/target/
+target/
+
+# Local runtime data
+*.log
+*.tmp
+*.temp
+*.pid
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*.bak
+
+# Local environment and secret files
+.env
+.env.*
+!.env.example
+*.local
+
+# Tauri app runtime output
+src-tauri/gen/
+
+# Coverage / test output
+coverage/
+.nyc_output/
+
+# Misc caches
+.cache/
