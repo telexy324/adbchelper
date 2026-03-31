@@ -28,6 +28,11 @@ pub fn tool_catalog() -> Vec<ToolDefinition> {
             description: "Compare Nacos config across environments and highlight drift.".to_string(),
             input_hint: "{ sourceEnv, targetEnv, dataId, group }".to_string(),
         },
+        ToolDefinition {
+            name: "inspect_ssh_host".to_string(),
+            description: "Run approved read-only server diagnostics and review host logs.".to_string(),
+            input_hint: "{ environment, host, commandPreset, logPath? }".to_string(),
+        },
     ]
 }
 

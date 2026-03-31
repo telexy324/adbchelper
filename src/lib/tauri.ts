@@ -6,7 +6,11 @@ import type {
   ChatSession,
   ConnectionProfile,
   EnvironmentProfile,
+  LogSearchInput,
+  LogSearchResponse,
   SendChatMessageInput,
+  SshDiagnosticsInput,
+  SshDiagnosticsResponse,
   ToolDefinition,
   UpsertConnectionProfileInput,
   UpsertEnvironmentInput,
@@ -59,4 +63,14 @@ export async function listToolCatalog(): Promise<ToolDefinition[]> {
 
 export async function sendChatMessage(input: SendChatMessageInput): Promise<ChatResponse> {
   return invoke<ChatResponse>("send_chat_message", { input });
+}
+
+export async function searchLogs(input: LogSearchInput): Promise<LogSearchResponse> {
+  return invoke<LogSearchResponse>("search_logs", { input });
+}
+
+export async function runSshDiagnostics(
+  input: SshDiagnosticsInput,
+): Promise<SshDiagnosticsResponse> {
+  return invoke<SshDiagnosticsResponse>("run_ssh_diagnostics", { input });
 }
