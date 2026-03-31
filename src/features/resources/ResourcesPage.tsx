@@ -3,8 +3,10 @@ import { SectionCard } from "../../components/SectionCard";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
-import { runSshDiagnostics, searchLogs } from "../../lib/tauri";
+import { compareNacosConfig, runSshDiagnostics, searchLogs } from "../../lib/tauri";
 import type {
+  CompareNacosConfigInput,
+  CompareNacosConfigResponse,
   EnvironmentProfile,
   LogSearchInput,
   LogSearchResponse,
@@ -27,8 +29,10 @@ const sshCommandOptions: { value: SshCommandPreset; label: string }[] = [
 ];
 
 export function ResourcesPage({ environments }: ResourcesPageProps) {
+  const defaultEnvironmentId = environments[0]?.id ?? "dev";
+
   const [logFilters, setLogFilters] = useState<LogSearchInput>({
-    environmentId: environments[0]?.id ?? "dev",
+    environmentId: defaultEnvironmentId,
     service: "",
     pod: "",
     keyword: "",
@@ -36,17 +40,27 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
     timeRange: "1h",
   });
   const [sshFilters, setSshFilters] = useState<SshDiagnosticsInput>({
-    environmentId: environments[0]?.id ?? "dev",
+    environmentId: defaultEnvironmentId,
     host: "",
     commandPreset: "system_overview",
     logPath: "",
   });
+  const [nacosFilters, setNacosFilters] = useState<CompareNacosConfigInput>({
+    sourceEnvironmentId: environments[1]?.id ?? defaultEnvironmentId,
+    targetEnvironmentId: environments[2]?.id ?? defaultEnvironmentId,
+    dataId: "payment-service.yaml",
+    group: "DEFAULT_GROUP",
+    namespaceId: "",
+  });
   const [logResults, setLogResults] = useState<LogSearchResponse | null>(null);
   const [sshResults, setSshResults] = useState<SshDiagnosticsResponse | null>(null);
+  const [nacosResults, setNacosResults] = useState<CompareNacosConfigResponse | null>(null);
   const [logStatusMessage, setLogStatusMessage] = useState<string | null>(null);
   const [sshStatusMessage, setSshStatusMessage] = useState<string | null>(null);
+  const [nacosStatusMessage, setNacosStatusMessage] = useState<string | null>(null);
   const [isLogLoading, setIsLogLoading] = useState(false);
   const [isSshLoading, setIsSshLoading] = useState(false);
+  const [isNacosLoading, setIsNacosLoading] = useState(false);
 
   useEffect(() => {
     if (environments.length === 0) {
@@ -60,6 +74,12 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
     setSshFilters((current) => ({
       ...current,
       environmentId: current.environmentId || environments[0].id,
+    }));
+    setNacosFilters((current) => ({
+      ...current,
+      sourceEnvironmentId: current.sourceEnvironmentId || environments[0].id,
+      targetEnvironmentId:
+        current.targetEnvironmentId || environments[environments.length - 1]?.id || environments[0].id,
     }));
   }, [environments]);
 
@@ -112,17 +132,54 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
     }
   }
 
-  const activeLogEnvironment =
-    environments.find((environment) => environment.id === logFilters.environmentId) ?? environments[0] ?? null;
-  const activeSshEnvironment =
-    environments.find((environment) => environment.id === sshFilters.environmentId) ?? environments[0] ?? null;
+  async function runNacosCompare(input: CompareNacosConfigInput) {
+    setIsNacosLoading(true);
+    setNacosStatusMessage(null);
+    try {
+      const response = await compareNacosConfig(normalizeNacosInput(input));
+      setNacosResults(response);
+      setNacosStatusMessage(
+        `Compared ${response.sourceEnvironmentId} against ${response.targetEnvironmentId} via ${response.adapterMode}.`,
+      );
+    } catch (error) {
+      setNacosStatusMessage(
+        error instanceof Error ? error.message : "Failed to compare Nacos configuration.",
+      );
+    } finally {
+      setIsNacosLoading(false);
+    }
+  }
 
   return (
     <div className="grid gap-6">
       <SectionCard
+        eyebrow="Operations Hub"
+        title="Read-Only Investigation Surfaces"
+        description="The roadmap slices now live together here: logs for error clustering, SSH for host diagnostics, and Nacos for environment drift."
+      >
+        <div className="grid gap-4 md:grid-cols-3">
+          <SummaryTile
+            label="Week 5"
+            title="ELK Log Analysis"
+            body="Search by service, pod, keyword, traceId, and time range with clustered failures."
+          />
+          <SummaryTile
+            label="Week 6"
+            title="SSH Diagnostics"
+            body="Run approved host checks and review server-side evidence without arbitrary shell access."
+          />
+          <SummaryTile
+            label="Week 7"
+            title="Nacos Config Diff"
+            body="Compare environment configuration drift and surface likely impact before rollout or incident response."
+          />
+        </div>
+      </SectionCard>
+
+      <SectionCard
         eyebrow="Week 5"
         title="Log Analysis Workbench"
-        description="Search logs with the same filters from the roadmap, cluster repeated failures, and shape evidence for chat and investigations."
+        description="Search logs, cluster repeated failures, and shape evidence for chat and investigations."
       >
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="Environment">
@@ -152,10 +209,7 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
             </select>
           </Field>
           <Field label="Service">
-            <Input
-              value={logFilters.service}
-              onChange={(event) => updateLogFilter("service", event.target.value)}
-            />
+            <Input value={logFilters.service} onChange={(event) => updateLogFilter("service", event.target.value)} />
           </Field>
           <Field label="Pod">
             <Input value={logFilters.pod} onChange={(event) => updateLogFilter("pod", event.target.value)} />
@@ -168,63 +222,42 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
             />
           </Field>
           <Field label="Trace ID">
-            <Input
-              value={logFilters.traceId}
-              onChange={(event) => updateLogFilter("traceId", event.target.value)}
-            />
+            <Input value={logFilters.traceId} onChange={(event) => updateLogFilter("traceId", event.target.value)} />
           </Field>
         </div>
-        <div className="flex flex-wrap gap-3">
-          <Button onClick={() => void runSearch(logFilters)} disabled={isLogLoading}>
-            {isLogLoading ? "Searching..." : "Search Logs"}
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => {
-              const nextFilters: LogSearchInput = {
-                environmentId: activeLogEnvironment?.id ?? environments[0]?.id ?? "dev",
-                service: "",
-                pod: "",
-                keyword: "",
-                traceId: "",
-                timeRange: "1h",
-              };
-              setFilters(nextFilters);
-              void runSearch(nextFilters);
-            }}
-          >
-            Reset Filters
-          </Button>
-        </div>
+        <ActionRow
+          primaryLabel={isLogLoading ? "Searching..." : "Search Logs"}
+          onPrimary={() => void runSearch(logFilters)}
+          primaryDisabled={isLogLoading}
+          onReset={() => {
+            const nextFilters: LogSearchInput = {
+              environmentId: logFilters.environmentId || defaultEnvironmentId,
+              service: "",
+              pod: "",
+              keyword: "",
+              traceId: "",
+              timeRange: "1h",
+            };
+            setLogFilters(nextFilters);
+            void runSearch(nextFilters);
+          }}
+          resetLabel="Reset Filters"
+        />
         {logStatusMessage ? <p className="text-sm text-muted-foreground">{logStatusMessage}</p> : null}
         {logResults ? (
           <div className="space-y-4">
-            <div className="rounded-xl border bg-muted/30 p-4">
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                <Badge variant="secondary">{logResults.adapterMode}</Badge>
-                <Badge variant="outline">{logResults.entries.length} events</Badge>
-                <Badge variant="outline">{logResults.clusters.length} clusters</Badge>
-              </div>
-              <p className="text-sm font-semibold text-foreground">{logResults.summary.headline}</p>
-              <p className="mt-2 text-xs leading-5 text-muted-foreground">{logResults.executedQuery}</p>
-            </div>
+            <ResultHeader
+              badges={[
+                { text: logResults.adapterMode, variant: "secondary" },
+                { text: `${logResults.entries.length} events`, variant: "outline" },
+                { text: `${logResults.clusters.length} clusters`, variant: "outline" },
+              ]}
+              headline={logResults.summary.headline}
+              caption={logResults.executedQuery}
+            />
             <div className="grid gap-4 lg:grid-cols-2">
-              <div className="rounded-xl border bg-background/80 p-4">
-                <p className="text-sm font-semibold">Likely causes</p>
-                <ul className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
-                  {logResults.summary.likelyCauses.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-              <div className="rounded-xl border bg-background/80 p-4">
-                <p className="text-sm font-semibold">Recommended next steps</p>
-                <ul className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
-                  {logResults.summary.recommendedNextSteps.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </div>
+              <SimpleListCard title="Likely causes" items={logResults.summary.likelyCauses} />
+              <SimpleListCard title="Recommended next steps" items={logResults.summary.recommendedNextSteps} />
             </div>
             <div className="space-y-3">
               <p className="text-sm font-semibold">Error clusters</p>
@@ -252,11 +285,12 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
           </div>
         ) : null}
       </SectionCard>
+
       <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
         <SectionCard
           eyebrow="Week 6"
           title="SSH Diagnostics Workbench"
-          description="Run read-only host diagnostics through approved presets, inspect host health, and pull log evidence without opening the door to arbitrary shell access."
+          description="Run approved read-only diagnostics, inspect host health, and review server-side evidence."
         >
           <div className="grid gap-4 md:grid-cols-2">
             <Field label="Environment">
@@ -276,9 +310,7 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
               <select
                 className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
                 value={sshFilters.commandPreset}
-                onChange={(event) =>
-                  updateSshFilter("commandPreset", event.target.value as SshCommandPreset)
-                }
+                onChange={(event) => updateSshFilter("commandPreset", event.target.value as SshCommandPreset)}
               >
                 {sshCommandOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -302,38 +334,34 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
               />
             </Field>
           </div>
-          <div className="flex flex-wrap gap-3">
-            <Button onClick={() => void runSsh(sshFilters)} disabled={isSshLoading}>
-              {isSshLoading ? "Running..." : "Run Diagnostics"}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                const nextFilters: SshDiagnosticsInput = {
-                  environmentId: activeSshEnvironment?.id ?? environments[0]?.id ?? "dev",
-                  host: "",
-                  commandPreset: "system_overview",
-                  logPath: "",
-                };
-                setSshFilters(nextFilters);
-                void runSsh(nextFilters);
-              }}
-            >
-              Reset Diagnostics
-            </Button>
-          </div>
+          <ActionRow
+            primaryLabel={isSshLoading ? "Running..." : "Run Diagnostics"}
+            onPrimary={() => void runSsh(sshFilters)}
+            primaryDisabled={isSshLoading}
+            onReset={() => {
+              const nextFilters: SshDiagnosticsInput = {
+                environmentId: sshFilters.environmentId || defaultEnvironmentId,
+                host: "",
+                commandPreset: "system_overview",
+                logPath: "",
+              };
+              setSshFilters(nextFilters);
+              void runSsh(nextFilters);
+            }}
+            resetLabel="Reset Diagnostics"
+          />
           {sshStatusMessage ? <p className="text-sm text-muted-foreground">{sshStatusMessage}</p> : null}
           {sshResults ? (
             <div className="space-y-4">
-              <div className="rounded-xl border bg-muted/30 p-4">
-                <div className="mb-3 flex flex-wrap items-center gap-2">
-                  <Badge variant="secondary">{sshResults.adapterMode}</Badge>
-                  <Badge variant="outline">{sshResults.targetHost}</Badge>
-                  <Badge variant="outline">{sshResults.commandPreset}</Badge>
-                </div>
-                <p className="text-sm font-semibold text-foreground">{sshResults.summaryHeadline}</p>
-                <p className="mt-2 text-xs leading-5 text-muted-foreground">{sshResults.executedCommand}</p>
-              </div>
+              <ResultHeader
+                badges={[
+                  { text: sshResults.adapterMode, variant: "secondary" },
+                  { text: sshResults.targetHost, variant: "outline" },
+                  { text: sshResults.commandPreset, variant: "outline" },
+                ]}
+                headline={sshResults.summaryHeadline}
+                caption={sshResults.executedCommand}
+              />
               <div className="grid gap-4 md:grid-cols-2">
                 {sshResults.healthSummary.map((metric) => (
                   <article className="rounded-xl border bg-background/80 p-4" key={metric.label}>
@@ -354,7 +382,15 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
                   {sshResults.logLines.map((line) => (
                     <article className="rounded-lg border bg-muted/20 p-3" key={`${line.timestamp}-${line.message}`}>
                       <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant={line.level === "ERROR" ? "danger" : line.level === "WARN" ? "warning" : "outline"}>
+                        <Badge
+                          variant={
+                            line.level === "ERROR"
+                              ? "danger"
+                              : line.level === "WARN"
+                                ? "warning"
+                                : "outline"
+                          }
+                        >
                           {line.level}
                         </Badge>
                         <span className="text-xs text-muted-foreground">{line.timestamp}</span>
@@ -368,10 +404,11 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
             </div>
           ) : null}
         </SectionCard>
+
         <SectionCard
           eyebrow="Readiness"
           title="Environment Coverage"
-          description="This keeps the broader roadmap visible while the Week 5 and Week 6 slices become real working surfaces."
+          description="This keeps the broader roadmap visible while the read-only integrations grow into full workflows."
         >
           <div className="space-y-4">
             {environments.map((environment) => (
@@ -391,25 +428,9 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
                 </p>
               </article>
             ))}
-            <div className="rounded-xl border border-dashed bg-background/70 p-4">
-              <p className="text-sm font-semibold">What Week 6 adds</p>
-              <ul className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
-                <li>SSH host diagnostics through a command whitelist instead of arbitrary commands</li>
-                <li>Host health summaries for CPU, memory, disk, and listener checks</li>
-                <li>Server log viewing for app and Nginx troubleshooting</li>
-              </ul>
-            </div>
-            <div className="rounded-xl border border-dashed bg-background/70 p-4">
-              <p className="text-sm font-semibold">Still next</p>
-              <ul className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
-                <li>Real SSH transport and profile-based authentication</li>
-                <li>Link SSH evidence directly into chat and investigations</li>
-                <li>Cross-signal pivots between host diagnostics, ELK logs, and Kubernetes state</li>
-              </ul>
-            </div>
             {sshResults ? (
               <div className="rounded-xl border border-dashed bg-background/70 p-4">
-                <p className="text-sm font-semibold">Approved command list</p>
+                <p className="text-sm font-semibold">Approved SSH commands</p>
                 <ul className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
                   {sshResults.allowedCommands.map((command) => (
                     <li key={command}>{command}</li>
@@ -417,12 +438,12 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
                 </ul>
               </div>
             ) : null}
-            {sshResults ? (
+            {nacosResults ? (
               <div className="rounded-xl border border-dashed bg-background/70 p-4">
-                <p className="text-sm font-semibold">Recommended follow-up</p>
+                <p className="text-sm font-semibold">Nacos drift focus</p>
                 <ul className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
-                  {sshResults.recommendedActions.map((action) => (
-                    <li key={action}>{action}</li>
+                  {nacosResults.summary.likelyImpact.map((item) => (
+                    <li key={item}>{item}</li>
                   ))}
                 </ul>
               </div>
@@ -430,25 +451,284 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
           </div>
         </SectionCard>
       </div>
+
+      <SectionCard
+        eyebrow="Week 7"
+        title="Nacos Config Diff"
+        description="Compare config versions across environments, surface changed keys, and explain what the drift may affect."
+      >
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <Field label="Source environment">
+            <select
+              className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
+              value={nacosFilters.sourceEnvironmentId}
+              onChange={(event) => updateNacosFilter("sourceEnvironmentId", event.target.value)}
+            >
+              {environments.map((environment) => (
+                <option key={environment.id} value={environment.id}>
+                  {environment.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Target environment">
+            <select
+              className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
+              value={nacosFilters.targetEnvironmentId}
+              onChange={(event) => updateNacosFilter("targetEnvironmentId", event.target.value)}
+            >
+              {environments.map((environment) => (
+                <option key={environment.id} value={environment.id}>
+                  {environment.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Data ID">
+            <Input
+              placeholder="payment-service.yaml"
+              value={nacosFilters.dataId}
+              onChange={(event) => updateNacosFilter("dataId", event.target.value)}
+            />
+          </Field>
+          <Field label="Group">
+            <Input
+              placeholder="DEFAULT_GROUP"
+              value={nacosFilters.group}
+              onChange={(event) => updateNacosFilter("group", event.target.value)}
+            />
+          </Field>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label="Namespace override">
+            <Input
+              placeholder="public"
+              value={nacosFilters.namespaceId}
+              onChange={(event) => updateNacosFilter("namespaceId", event.target.value)}
+            />
+          </Field>
+          <div className="rounded-xl border border-dashed bg-background/70 p-4 text-sm leading-6 text-muted-foreground">
+            Profile-driven HTTP compare uses the saved `nacos` profiles for each environment. If a namespace
+            override is empty, the compare uses the profile scope or `namespaceId` from Extra JSON.
+          </div>
+        </div>
+        <ActionRow
+          primaryLabel={isNacosLoading ? "Comparing..." : "Compare Config"}
+          onPrimary={() => void runNacosCompare(nacosFilters)}
+          primaryDisabled={isNacosLoading}
+          onReset={() => {
+            const nextFilters: CompareNacosConfigInput = {
+              sourceEnvironmentId: environments[1]?.id ?? defaultEnvironmentId,
+              targetEnvironmentId: environments[2]?.id ?? defaultEnvironmentId,
+              dataId: "payment-service.yaml",
+              group: "DEFAULT_GROUP",
+              namespaceId: "",
+            };
+            setNacosFilters(nextFilters);
+            setNacosResults(null);
+            setNacosStatusMessage("Reset Nacos compare filters.");
+          }}
+          resetLabel="Reset Compare"
+        />
+        {nacosStatusMessage ? <p className="text-sm text-muted-foreground">{nacosStatusMessage}</p> : null}
+        {nacosResults ? (
+          <div className="space-y-4">
+            <ResultHeader
+              badges={[
+                { text: nacosResults.adapterMode, variant: "secondary" },
+                { text: `${nacosResults.diffEntries.length} diff entries`, variant: "outline" },
+                {
+                  text: nacosResults.namespaceId ? `namespace ${nacosResults.namespaceId}` : "default namespace",
+                  variant: "outline",
+                },
+              ]}
+              headline={nacosResults.summary.headline}
+              caption={`${nacosResults.group} / ${nacosResults.dataId}`}
+            />
+            <div className="grid gap-4 lg:grid-cols-2">
+              <SimpleListCard title="Likely impact" items={nacosResults.summary.likelyImpact} />
+              <SimpleListCard title="Explanation" items={nacosResults.summary.explanation} />
+            </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <ConfigPreviewCard title={nacosResults.source.environmentId} profile={nacosResults.source.profileName} value={nacosResults.source.value} />
+              <ConfigPreviewCard title={nacosResults.target.environmentId} profile={nacosResults.target.profileName} value={nacosResults.target.value} />
+            </div>
+            <div className="space-y-3">
+              <p className="text-sm font-semibold">Config drift</p>
+              {nacosResults.diffEntries.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No drift was detected for this config.</p>
+              ) : (
+                nacosResults.diffEntries.map((entry) => (
+                  <article className="rounded-xl border bg-muted/20 p-4" key={`${entry.status}-${entry.key}`}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge
+                        variant={
+                          entry.status === "changed"
+                            ? "warning"
+                            : entry.status === "removed"
+                              ? "danger"
+                              : entry.status === "added"
+                                ? "success"
+                                : "outline"
+                        }
+                      >
+                        {entry.status}
+                      </Badge>
+                      <span className="text-sm font-semibold">{entry.key}</span>
+                    </div>
+                    <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                      <ValuePane label="Source" value={entry.sourceValue} />
+                      <ValuePane label="Target" value={entry.targetValue} />
+                    </div>
+                  </article>
+                ))
+              )}
+            </div>
+          </div>
+        ) : null}
+      </SectionCard>
     </div>
   );
 
   function updateLogFilter<Key extends keyof LogSearchInput>(key: Key, value: LogSearchInput[Key]) {
-    setLogFilters((current) => ({
-      ...current,
-      [key]: value,
-    }));
+    setLogFilters((current) => ({ ...current, [key]: value }));
   }
 
   function updateSshFilter<Key extends keyof SshDiagnosticsInput>(
     key: Key,
     value: SshDiagnosticsInput[Key],
   ) {
-    setSshFilters((current) => ({
-      ...current,
-      [key]: value,
-    }));
+    setSshFilters((current) => ({ ...current, [key]: value }));
   }
+
+  function updateNacosFilter<Key extends keyof CompareNacosConfigInput>(
+    key: Key,
+    value: CompareNacosConfigInput[Key],
+  ) {
+    setNacosFilters((current) => ({ ...current, [key]: value }));
+  }
+}
+
+function normalizeNacosInput(input: CompareNacosConfigInput): CompareNacosConfigInput {
+  return {
+    ...input,
+    dataId: input.dataId.trim(),
+    group: input.group.trim(),
+    namespaceId: input.namespaceId?.trim() || undefined,
+  };
+}
+
+function ActionRow({
+  primaryLabel,
+  onPrimary,
+  primaryDisabled,
+  onReset,
+  resetLabel,
+}: {
+  primaryLabel: string;
+  onPrimary: () => void;
+  primaryDisabled?: boolean;
+  onReset: () => void;
+  resetLabel: string;
+}) {
+  return (
+    <div className="flex flex-wrap gap-3">
+      <Button onClick={onPrimary} disabled={primaryDisabled}>
+        {primaryLabel}
+      </Button>
+      <Button variant="outline" onClick={onReset}>
+        {resetLabel}
+      </Button>
+    </div>
+  );
+}
+
+function ResultHeader({
+  badges,
+  headline,
+  caption,
+}: {
+  badges: { text: string; variant: "secondary" | "outline" }[];
+  headline: string;
+  caption: string;
+}) {
+  return (
+    <div className="rounded-xl border bg-muted/30 p-4">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        {badges.map((badge) => (
+          <Badge key={`${badge.variant}-${badge.text}`} variant={badge.variant}>
+            {badge.text}
+          </Badge>
+        ))}
+      </div>
+      <p className="text-sm font-semibold text-foreground">{headline}</p>
+      <p className="mt-2 text-xs leading-5 text-muted-foreground">{caption}</p>
+    </div>
+  );
+}
+
+function SimpleListCard({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div className="rounded-xl border bg-background/80 p-4">
+      <p className="text-sm font-semibold">{title}</p>
+      <ul className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ConfigPreviewCard({
+  title,
+  profile,
+  value,
+}: {
+  title: string;
+  profile: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-xl border bg-background/80 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-sm font-semibold">{title}</p>
+        <Badge variant="outline">{profile}</Badge>
+      </div>
+      <pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-muted/30 p-3 text-xs leading-6 text-muted-foreground">
+        {value}
+      </pre>
+    </div>
+  );
+}
+
+function ValuePane({ label, value }: { label: string; value: string | null }) {
+  return (
+    <div className="rounded-lg border bg-background/70 p-3">
+      <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
+      <pre className="mt-2 whitespace-pre-wrap break-all text-xs leading-6 text-muted-foreground">
+        {value ?? "(missing)"}
+      </pre>
+    </div>
+  );
+}
+
+function SummaryTile({
+  label,
+  title,
+  body,
+}: {
+  label: string;
+  title: string;
+  body: string;
+}) {
+  return (
+    <div className="rounded-xl border bg-muted/20 p-4">
+      <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
+      <p className="mt-2 text-base font-semibold">{title}</p>
+      <p className="mt-2 text-sm leading-6 text-muted-foreground">{body}</p>
+    </div>
+  );
 }
 
 function EnvironmentBadge({ kind }: { kind: EnvironmentProfile["kind"] }) {

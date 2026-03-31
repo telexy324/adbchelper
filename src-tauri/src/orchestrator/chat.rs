@@ -26,7 +26,7 @@ pub fn tool_catalog() -> Vec<ToolDefinition> {
         ToolDefinition {
             name: "compare_nacos_config".to_string(),
             description: "Compare Nacos config across environments and highlight drift.".to_string(),
-            input_hint: "{ sourceEnv, targetEnv, dataId, group }".to_string(),
+            input_hint: "{ sourceEnv, targetEnv, dataId, group, namespaceId? }".to_string(),
         },
         ToolDefinition {
             name: "inspect_ssh_host".to_string(),

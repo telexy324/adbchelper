@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppHealth,
+  CompareNacosConfigInput,
+  CompareNacosConfigResponse,
   ChatResponse,
   ChatMessage,
   ChatSession,
@@ -73,4 +75,10 @@ export async function runSshDiagnostics(
   input: SshDiagnosticsInput,
 ): Promise<SshDiagnosticsResponse> {
   return invoke<SshDiagnosticsResponse>("run_ssh_diagnostics", { input });
+}
+
+export async function compareNacosConfig(
+  input: CompareNacosConfigInput,
+): Promise<CompareNacosConfigResponse> {
+  return invoke<CompareNacosConfigResponse>("compare_nacos_config", { input });
 }

@@ -50,6 +50,7 @@ pub fn run() {
             commands::chat::list_tool_catalog,
             commands::chat::send_chat_message,
             commands::logs::search_logs,
+            commands::nacos::compare_nacos_config,
             commands::ssh::run_ssh_diagnostics,
             commands::settings::save_environment,
             commands::settings::list_connection_profiles,

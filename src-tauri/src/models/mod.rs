@@ -3,4 +3,5 @@ pub mod chat;
 pub mod connection_profile;
 pub mod environment;
 pub mod logs;
+pub mod nacos;
 pub mod ssh;

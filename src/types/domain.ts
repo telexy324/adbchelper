@@ -192,6 +192,47 @@ export interface SshDiagnosticsResponse {
   recommendedActions: string[];
 }
 
+export interface CompareNacosConfigInput {
+  sourceEnvironmentId: string;
+  targetEnvironmentId: string;
+  dataId: string;
+  group: string;
+  namespaceId?: string;
+}
+
+export interface NacosConfigVersion {
+  environmentId: string;
+  profileName: string;
+  namespaceId: string | null;
+  value: string;
+}
+
+export interface NacosDiffEntry {
+  key: string;
+  status: string;
+  sourceValue: string | null;
+  targetValue: string | null;
+}
+
+export interface NacosDiffSummary {
+  headline: string;
+  likelyImpact: string[];
+  explanation: string[];
+}
+
+export interface CompareNacosConfigResponse {
+  sourceEnvironmentId: string;
+  targetEnvironmentId: string;
+  dataId: string;
+  group: string;
+  namespaceId: string | null;
+  adapterMode: string;
+  source: NacosConfigVersion;
+  target: NacosConfigVersion;
+  diffEntries: NacosDiffEntry[];
+  summary: NacosDiffSummary;
+}
+
 export interface AppHealth {
   appName: string;
   version: string;

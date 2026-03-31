@@ -451,6 +451,26 @@ pub fn validate_connection_profile(input: &UpsertConnectionProfileInput) -> Vali
         }
     }
 
+    if input.profile_type == "nacos" {
+        if let Some(config_json) = &input.config_json {
+            if let Ok(config) = serde_json::from_str::<serde_json::Value>(config_json) {
+                if let Some(auth_mode) = config.get("authMode").and_then(serde_json::Value::as_str) {
+                    if !matches!(auth_mode, "none" | "basic" | "bearer" | "accessToken") {
+                        messages.push(
+                            "Nacos authMode must be one of none, basic, bearer, or accessToken."
+                                .to_string(),
+                        );
+                    }
+                }
+                if let Some(api_version) = config.get("apiVersion").and_then(serde_json::Value::as_str) {
+                    if !matches!(api_version, "v1" | "v2") {
+                        messages.push("Nacos apiVersion must be either v1 or v2.".to_string());
+                    }
+                }
+            }
+        }
+    }
+
     if let Some(config_json) = &input.config_json {
         if !config_json.trim().is_empty() && serde_json::from_str::<serde_json::Value>(config_json).is_err() {
             messages.push("Extra JSON must be valid JSON.".to_string());
