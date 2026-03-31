@@ -11,10 +11,15 @@ import type {
   EnvironmentProfile,
   InvestigationDetail,
   InvestigationEvidence,
+  InvestigationCorrelation,
   InvestigationReport,
   InvestigationReportInput,
   InvestigationSaveResponse,
   InvestigationSummary,
+  KubernetesEvent,
+  KubernetesEventsSummary,
+  ListKubernetesEventsInput,
+  ListKubernetesEventsResponse,
   LogSearchInput,
   LogSearchResponse,
   SaveInvestigationInput,
@@ -109,6 +114,12 @@ export async function generateInvestigationReport(
 
 export async function searchLogs(input: LogSearchInput): Promise<LogSearchResponse> {
   return invoke<LogSearchResponse>("search_logs", { input });
+}
+
+export async function listKubernetesEvents(
+  input: ListKubernetesEventsInput,
+): Promise<ListKubernetesEventsResponse> {
+  return invoke<ListKubernetesEventsResponse>("list_kubernetes_events", { input });
 }
 
 export async function runSshDiagnostics(

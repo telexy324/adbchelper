@@ -287,6 +287,7 @@ export interface InvestigationDetail {
   investigation: InvestigationSummary;
   evidence: InvestigationEvidence[];
   timeline: InvestigationTimelineEvent[];
+  correlations: InvestigationCorrelation[];
 }
 
 export interface InvestigationReportInput {
@@ -297,6 +298,47 @@ export interface InvestigationReport {
   investigation: InvestigationSummary;
   markdown: string;
   html: string;
+}
+
+export interface InvestigationCorrelation {
+  id: string;
+  title: string;
+  detail: string;
+  confidence: string;
+  linkedEvidenceIds: string[];
+}
+
+export interface ListKubernetesEventsInput {
+  environmentId: string;
+  namespace: string;
+  involvedObject?: string;
+  reason?: string;
+}
+
+export interface KubernetesEvent {
+  id: string;
+  namespace: string;
+  kind: string;
+  name: string;
+  reason: string;
+  level: string;
+  message: string;
+  eventTime: string;
+}
+
+export interface KubernetesEventsSummary {
+  headline: string;
+  likelyImpact: string[];
+  recommendedNextSteps: string[];
+}
+
+export interface ListKubernetesEventsResponse {
+  environmentId: string;
+  namespace: string;
+  adapterMode: string;
+  querySummary: string;
+  events: KubernetesEvent[];
+  summary: KubernetesEventsSummary;
 }
 
 export interface AppHealth {

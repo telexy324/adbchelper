@@ -58,6 +58,7 @@ pub struct InvestigationDetail {
     pub investigation: InvestigationSummary,
     pub evidence: Vec<InvestigationEvidence>,
     pub timeline: Vec<InvestigationTimelineEvent>,
+    pub correlations: Vec<InvestigationCorrelation>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -72,4 +73,14 @@ pub struct InvestigationReport {
     pub investigation: InvestigationSummary,
     pub markdown: String,
     pub html: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InvestigationCorrelation {
+    pub id: String,
+    pub title: String,
+    pub detail: String,
+    pub confidence: String,
+    pub linked_evidence_ids: Vec<String>,
 }

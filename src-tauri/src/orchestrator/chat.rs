@@ -19,6 +19,11 @@ pub fn tool_catalog() -> Vec<ToolDefinition> {
             input_hint: "{ environment, namespace, podName, tailLines }".to_string(),
         },
         ToolDefinition {
+            name: "list_k8s_events".to_string(),
+            description: "Inspect Kubernetes warning and normal events for a namespace or workload.".to_string(),
+            input_hint: "{ environment, namespace, involvedObject?, reason? }".to_string(),
+        },
+        ToolDefinition {
             name: "search_elk_logs".to_string(),
             description: "Search ELK for errors, keywords, or trace IDs.".to_string(),
             input_hint: "{ environment, service, timeRange, query }".to_string(),

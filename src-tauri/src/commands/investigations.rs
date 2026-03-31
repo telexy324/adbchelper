@@ -2,8 +2,9 @@ use rusqlite::Connection;
 use tauri::State;
 
 use crate::models::investigation::{
-    InvestigationDetail, InvestigationEvidence, InvestigationReport, InvestigationReportInput,
-    InvestigationSaveResponse, InvestigationSummary, InvestigationTimelineEvent, SaveInvestigationInput,
+    InvestigationCorrelation, InvestigationDetail, InvestigationEvidence, InvestigationReport,
+    InvestigationReportInput, InvestigationSaveResponse, InvestigationSummary,
+    InvestigationTimelineEvent, SaveInvestigationInput,
 };
 use crate::storage::db;
 use crate::AppState;
@@ -39,11 +40,13 @@ pub fn get_investigation_detail(
     let evidence = db::list_investigation_evidence(&connection, &investigation_id)
         .map_err(|error| error.to_string())?;
     let timeline = build_timeline(&evidence);
+    let correlations = build_correlations(&evidence);
 
     Ok(InvestigationDetail {
         investigation,
         evidence,
         timeline,
+        correlations,
     })
 }
 
@@ -116,9 +119,10 @@ pub fn generate_investigation_report(
     let evidence = db::list_investigation_evidence(&connection, &input.investigation_id)
         .map_err(|error| error.to_string())?;
     let timeline = build_timeline(&evidence);
+    let correlations = build_correlations(&evidence);
 
-    let markdown = build_markdown_report(&investigation, &evidence, &timeline);
-    let html = build_html_report(&investigation, &evidence, &timeline);
+    let markdown = build_markdown_report(&investigation, &evidence, &timeline, &correlations);
+    let html = build_html_report(&investigation, &evidence, &timeline, &correlations);
 
     db::insert_audit_log(
         &connection,
@@ -159,6 +163,7 @@ fn build_markdown_report(
     investigation: &InvestigationSummary,
     evidence: &[InvestigationEvidence],
     timeline: &[InvestigationTimelineEvent],
+    correlations: &[InvestigationCorrelation],
 ) -> String {
     let evidence_section = if evidence.is_empty() {
         "- No evidence saved yet.".to_string()
@@ -185,8 +190,18 @@ fn build_markdown_report(
             .join("\n")
     };
 
+    let correlation_section = if correlations.is_empty() {
+        "- No cross-source correlations detected yet.".to_string()
+    } else {
+        correlations
+            .iter()
+            .map(|item| format!("- [{}] {}: {}", item.confidence, item.title, item.detail))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
     format!(
-        "# {title}\n\n## Summary\n- Environment: {environment}\n- Status: {status}\n- Created: {created}\n- Updated: {updated}\n- Evidence count: {evidence_count}\n\n## Timeline\n{timeline}\n\n## Evidence\n{evidence}\n",
+        "# {title}\n\n## Summary\n- Environment: {environment}\n- Status: {status}\n- Created: {created}\n- Updated: {updated}\n- Evidence count: {evidence_count}\n\n## Timeline\n{timeline}\n\n## Cross-Source Correlation\n{correlations}\n\n## Evidence\n{evidence}\n",
         title = investigation.title,
         environment = investigation.environment_id,
         status = investigation.status,
@@ -194,6 +209,7 @@ fn build_markdown_report(
         updated = investigation.updated_at,
         evidence_count = evidence.len(),
         timeline = timeline_section,
+        correlations = correlation_section,
         evidence = evidence_section,
     )
 }
@@ -202,6 +218,7 @@ fn build_html_report(
     investigation: &InvestigationSummary,
     evidence: &[InvestigationEvidence],
     timeline: &[InvestigationTimelineEvent],
+    correlations: &[InvestigationCorrelation],
 ) -> String {
     let timeline_items = if timeline.is_empty() {
         "<li>No timeline events yet.</li>".to_string()
@@ -237,16 +254,161 @@ fn build_html_report(
             .join("")
     };
 
+    let correlation_cards = if correlations.is_empty() {
+        "<p>No cross-source correlations detected yet.</p>".to_string()
+    } else {
+        correlations
+            .iter()
+            .map(|item| {
+                format!(
+                    "<section class=\"card\"><h3>{}</h3><p><strong>{}</strong></p><p>{}</p></section>",
+                    escape_html(&item.title),
+                    escape_html(&item.confidence),
+                    escape_html(&item.detail)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("")
+    };
+
     format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\" /><title>{title}</title><style>body{{font-family:Arial,sans-serif;margin:32px;background:#faf8f4;color:#1f2937}}h1,h2,h3{{margin-bottom:12px}}.meta{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:24px}}.card,.evidence{{border:1px solid #e5e7eb;border-radius:16px;padding:16px;background:white;margin-bottom:16px}}pre{{white-space:pre-wrap;word-break:break-word;background:#f8fafc;padding:12px;border-radius:12px;overflow:auto}}</style></head><body><h1>{title}</h1><div class=\"meta\"><div class=\"card\"><strong>Environment</strong><div>{environment}</div></div><div class=\"card\"><strong>Status</strong><div>{status}</div></div><div class=\"card\"><strong>Created</strong><div>{created}</div></div><div class=\"card\"><strong>Updated</strong><div>{updated}</div></div></div><h2>Timeline</h2><div class=\"card\"><ul>{timeline}</ul></div><h2>Evidence</h2>{evidence}</body></html>",
+        "<!doctype html><html><head><meta charset=\"utf-8\" /><title>{title}</title><style>body{{font-family:Arial,sans-serif;margin:32px;background:#faf8f4;color:#1f2937}}h1,h2,h3{{margin-bottom:12px}}.meta{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:24px}}.card,.evidence{{border:1px solid #e5e7eb;border-radius:16px;padding:16px;background:white;margin-bottom:16px}}pre{{white-space:pre-wrap;word-break:break-word;background:#f8fafc;padding:12px;border-radius:12px;overflow:auto}}</style></head><body><h1>{title}</h1><div class=\"meta\"><div class=\"card\"><strong>Environment</strong><div>{environment}</div></div><div class=\"card\"><strong>Status</strong><div>{status}</div></div><div class=\"card\"><strong>Created</strong><div>{created}</div></div><div class=\"card\"><strong>Updated</strong><div>{updated}</div></div></div><h2>Timeline</h2><div class=\"card\"><ul>{timeline}</ul></div><h2>Cross-Source Correlation</h2>{correlations}<h2>Evidence</h2>{evidence}</body></html>",
         title = escape_html(&investigation.title),
         environment = escape_html(&investigation.environment_id),
         status = escape_html(&investigation.status),
         created = escape_html(&investigation.created_at),
         updated = escape_html(&investigation.updated_at),
         timeline = timeline_items,
+        correlations = correlation_cards,
         evidence = evidence_cards,
     )
+}
+
+fn build_correlations(evidence: &[InvestigationEvidence]) -> Vec<InvestigationCorrelation> {
+    let mut correlations = Vec::new();
+
+    let kubernetes = evidence
+        .iter()
+        .filter(|item| item.evidence_type == "kubernetes_events")
+        .collect::<Vec<_>>();
+    let nacos = evidence
+        .iter()
+        .filter(|item| item.evidence_type == "nacos_diff")
+        .collect::<Vec<_>>();
+    let logs = evidence
+        .iter()
+        .filter(|item| item.evidence_type == "log_search")
+        .collect::<Vec<_>>();
+    let ssh = evidence
+        .iter()
+        .filter(|item| item.evidence_type == "ssh_diagnostics")
+        .collect::<Vec<_>>();
+
+    for k8s in &kubernetes {
+        let k8s_value = parse_json(&k8s.content_json);
+        let namespace = json_string(&k8s_value, &["namespace"]).unwrap_or_else(|| "unknown".to_string());
+        let names = json_array_strings(&k8s_value, &["events"], &["name"]);
+
+        for nacos_item in &nacos {
+            let nacos_value = parse_json(&nacos_item.content_json);
+            let data_id = json_string(&nacos_value, &["dataId"]).unwrap_or_else(|| nacos_item.title.clone());
+            let inferred_service = data_id.split('.').next().unwrap_or(&data_id).to_ascii_lowercase();
+            if names
+                .iter()
+                .any(|name| name.to_ascii_lowercase().contains(&inferred_service))
+                || nacos_item.summary.to_ascii_lowercase().contains(&namespace.to_ascii_lowercase())
+            {
+                correlations.push(InvestigationCorrelation {
+                    id: format!("{}-{}", k8s.id, nacos_item.id),
+                    title: "Kubernetes events align with config drift".to_string(),
+                    detail: format!(
+                        "Events in namespace {} mention workloads related to {}, which also appears in the saved Nacos drift evidence.",
+                        namespace, data_id
+                    ),
+                    confidence: "medium".to_string(),
+                    linked_evidence_ids: vec![k8s.id.clone(), nacos_item.id.clone()],
+                });
+            }
+        }
+
+        for log_item in &logs {
+            let log_value = parse_json(&log_item.content_json);
+            let services = json_array_strings(&log_value, &["entries"], &["service"]);
+            if names.iter().any(|name| services.iter().any(|service| name.to_ascii_lowercase().contains(&service.to_ascii_lowercase()))) {
+                correlations.push(InvestigationCorrelation {
+                    id: format!("{}-{}", k8s.id, log_item.id),
+                    title: "Kubernetes warnings overlap with log services".to_string(),
+                    detail: format!(
+                        "Saved Kubernetes events and log evidence reference overlapping workloads in namespace {}.",
+                        namespace
+                    ),
+                    confidence: "high".to_string(),
+                    linked_evidence_ids: vec![k8s.id.clone(), log_item.id.clone()],
+                });
+            }
+        }
+    }
+
+    for log_item in &logs {
+        let log_value = parse_json(&log_item.content_json);
+        let services = json_array_strings(&log_value, &["entries"], &["service"]);
+        for ssh_item in &ssh {
+            let ssh_value = parse_json(&ssh_item.content_json);
+            let summary = json_string(&ssh_value, &["summaryHeadline"]).unwrap_or_else(|| ssh_item.summary.clone());
+            if services
+                .iter()
+                .any(|service| summary.to_ascii_lowercase().contains(&service.to_ascii_lowercase()))
+            {
+                correlations.push(InvestigationCorrelation {
+                    id: format!("{}-{}", log_item.id, ssh_item.id),
+                    title: "Application logs align with host diagnostics".to_string(),
+                    detail: "Saved log evidence and SSH diagnostics point at the same service path or runtime symptom.".to_string(),
+                    confidence: "medium".to_string(),
+                    linked_evidence_ids: vec![log_item.id.clone(), ssh_item.id.clone()],
+                });
+            }
+        }
+    }
+
+    correlations.sort_by(|left, right| left.title.cmp(&right.title));
+    correlations.dedup_by(|left, right| left.id == right.id);
+    correlations
+}
+
+fn parse_json(content: &str) -> serde_json::Value {
+    serde_json::from_str(content).unwrap_or(serde_json::Value::Null)
+}
+
+fn json_string(value: &serde_json::Value, path: &[&str]) -> Option<String> {
+    let mut current = value;
+    for segment in path {
+        current = current.get(*segment)?;
+    }
+    current.as_str().map(str::to_string)
+}
+
+fn json_array_strings(
+    value: &serde_json::Value,
+    array_path: &[&str],
+    leaf_path: &[&str],
+) -> Vec<String> {
+    let mut current = value;
+    for segment in array_path {
+        current = match current.get(*segment) {
+            Some(next) => next,
+            None => return Vec::new(),
+        };
+    }
+
+    current
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| json_string(item, leaf_path))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
 }
 
 fn pretty_json(content_json: &str) -> String {

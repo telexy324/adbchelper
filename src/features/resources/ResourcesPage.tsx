@@ -6,6 +6,7 @@ import { Input } from "../../components/ui/input";
 import {
   attachToolEvidence,
   compareNacosConfig,
+  listKubernetesEvents,
   listChatSessions,
   listInvestigations,
   runSshDiagnostics,
@@ -18,6 +19,8 @@ import type {
   CompareNacosConfigResponse,
   EnvironmentProfile,
   InvestigationSummary,
+  ListKubernetesEventsInput,
+  ListKubernetesEventsResponse,
   LogSearchInput,
   LogSearchResponse,
   LogTimeRange,
@@ -55,6 +58,12 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
     commandPreset: "system_overview",
     logPath: "",
   });
+  const [kubernetesFilters, setKubernetesFilters] = useState<ListKubernetesEventsInput>({
+    environmentId: defaultEnvironmentId,
+    namespace: "default",
+    involvedObject: "",
+    reason: "",
+  });
   const [nacosFilters, setNacosFilters] = useState<CompareNacosConfigInput>({
     sourceEnvironmentId: environments[1]?.id ?? defaultEnvironmentId,
     targetEnvironmentId: environments[2]?.id ?? defaultEnvironmentId,
@@ -64,6 +73,7 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
   });
   const [logResults, setLogResults] = useState<LogSearchResponse | null>(null);
   const [sshResults, setSshResults] = useState<SshDiagnosticsResponse | null>(null);
+  const [kubernetesResults, setKubernetesResults] = useState<ListKubernetesEventsResponse | null>(null);
   const [nacosResults, setNacosResults] = useState<CompareNacosConfigResponse | null>(null);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [investigations, setInvestigations] = useState<InvestigationSummary[]>([]);
@@ -72,10 +82,12 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
   const [investigationTitle, setInvestigationTitle] = useState("Nacos drift investigation");
   const [logStatusMessage, setLogStatusMessage] = useState<string | null>(null);
   const [sshStatusMessage, setSshStatusMessage] = useState<string | null>(null);
+  const [kubernetesStatusMessage, setKubernetesStatusMessage] = useState<string | null>(null);
   const [nacosStatusMessage, setNacosStatusMessage] = useState<string | null>(null);
   const [attachStatusMessage, setAttachStatusMessage] = useState<string | null>(null);
   const [isLogLoading, setIsLogLoading] = useState(false);
   const [isSshLoading, setIsSshLoading] = useState(false);
+  const [isKubernetesLoading, setIsKubernetesLoading] = useState(false);
   const [isNacosLoading, setIsNacosLoading] = useState(false);
   const [isAttachingChat, setIsAttachingChat] = useState(false);
   const [isAttachingInvestigation, setIsAttachingInvestigation] = useState(false);
@@ -90,6 +102,10 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
       environmentId: current.environmentId || environments[0].id,
     }));
     setSshFilters((current) => ({
+      ...current,
+      environmentId: current.environmentId || environments[0].id,
+    }));
+    setKubernetesFilters((current) => ({
       ...current,
       environmentId: current.environmentId || environments[0].id,
     }));
@@ -119,6 +135,12 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
       host: sshFilters.host,
       commandPreset: sshFilters.commandPreset,
       logPath: sshFilters.logPath,
+    });
+    void runKubernetesEvents({
+      environmentId: kubernetesFilters.environmentId || environments[0].id,
+      namespace: kubernetesFilters.namespace,
+      involvedObject: kubernetesFilters.involvedObject,
+      reason: kubernetesFilters.reason,
     });
   }, []);
 
@@ -151,6 +173,22 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
       setSshStatusMessage(error instanceof Error ? error.message : "Failed to run SSH diagnostics.");
     } finally {
       setIsSshLoading(false);
+    }
+  }
+
+  async function runKubernetesEvents(input: ListKubernetesEventsInput) {
+    setIsKubernetesLoading(true);
+    setKubernetesStatusMessage(null);
+    try {
+      const response = await listKubernetesEvents(normalizeKubernetesInput(input));
+      setKubernetesResults(response);
+      setKubernetesStatusMessage(`Loaded ${response.events.length} Kubernetes events from ${response.adapterMode}.`);
+    } catch (error) {
+      setKubernetesStatusMessage(
+        error instanceof Error ? error.message : "Failed to load Kubernetes events.",
+      );
+    } finally {
+      setIsKubernetesLoading(false);
     }
   }
 
@@ -241,14 +279,52 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
     }
   }
 
+  async function handleSaveEvidenceToInvestigation(options: {
+    environmentId: string;
+    evidenceType: string;
+    title: string;
+    summary: string;
+    contentJson: string;
+  }) {
+    setIsAttachingInvestigation(true);
+    setAttachStatusMessage(null);
+    try {
+      const response = await saveInvestigationEvidence({
+        investigationId: attachInvestigationId === "new" ? undefined : attachInvestigationId,
+        title:
+          attachInvestigationId === "new"
+            ? investigationTitle.trim() || "Cross-source investigation"
+            : undefined,
+        environmentId: options.environmentId,
+        evidenceType: options.evidenceType,
+        evidenceTitle: options.title,
+        summary: options.summary,
+        contentJson: options.contentJson,
+      });
+      setAttachInvestigationId(response.investigation.id);
+      setInvestigationTitle(response.investigation.title);
+      setAttachStatusMessage(`Saved evidence to investigation "${response.investigation.title}".`);
+      await refreshEvidenceTargets();
+    } catch (error) {
+      setAttachStatusMessage(error instanceof Error ? error.message : "Failed to save investigation evidence.");
+    } finally {
+      setIsAttachingInvestigation(false);
+    }
+  }
+
   return (
     <div className="grid gap-6">
       <SectionCard
         eyebrow="Operations Hub"
         title="Read-Only Investigation Surfaces"
-        description="The roadmap slices now live together here: logs for error clustering, SSH for host diagnostics, and Nacos for environment drift."
+        description="The roadmap slices now live together here: Kubernetes events, logs, SSH, and Nacos all feed the same investigation flow."
       >
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <SummaryTile
+            label="Week 4"
+            title="Kubernetes Events"
+            body="Inspect namespace warnings and workload events, then carry them into investigations."
+          />
           <SummaryTile
             label="Week 5"
             title="ELK Log Analysis"
@@ -265,6 +341,116 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
             body="Compare environment configuration drift and surface likely impact before rollout or incident response."
           />
         </div>
+      </SectionCard>
+
+      <SectionCard
+        eyebrow="Week 4"
+        title="Kubernetes Events Workbench"
+        description="Inspect namespace events and save rollout or pod-failure signals into the active investigation."
+      >
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <Field label="Environment">
+            <select
+              className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
+              value={kubernetesFilters.environmentId}
+              onChange={(event) => updateKubernetesFilter("environmentId", event.target.value)}
+            >
+              {environments.map((environment) => (
+                <option key={environment.id} value={environment.id}>
+                  {environment.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Namespace">
+            <Input
+              value={kubernetesFilters.namespace}
+              onChange={(event) => updateKubernetesFilter("namespace", event.target.value)}
+            />
+          </Field>
+          <Field label="Workload filter">
+            <Input
+              placeholder="payment-api"
+              value={kubernetesFilters.involvedObject}
+              onChange={(event) => updateKubernetesFilter("involvedObject", event.target.value)}
+            />
+          </Field>
+          <Field label="Reason filter">
+            <Input
+              placeholder="BackOff, Failed"
+              value={kubernetesFilters.reason}
+              onChange={(event) => updateKubernetesFilter("reason", event.target.value)}
+            />
+          </Field>
+        </div>
+        <ActionRow
+          primaryLabel={isKubernetesLoading ? "Loading..." : "Load Events"}
+          onPrimary={() => void runKubernetesEvents(kubernetesFilters)}
+          primaryDisabled={isKubernetesLoading}
+          onReset={() => {
+            const nextFilters: ListKubernetesEventsInput = {
+              environmentId: kubernetesFilters.environmentId || defaultEnvironmentId,
+              namespace: "default",
+              involvedObject: "",
+              reason: "",
+            };
+            setKubernetesFilters(nextFilters);
+            void runKubernetesEvents(nextFilters);
+          }}
+          resetLabel="Reset Events"
+        />
+        {kubernetesStatusMessage ? <p className="text-sm text-muted-foreground">{kubernetesStatusMessage}</p> : null}
+        {kubernetesResults ? (
+          <div className="space-y-4">
+            <ResultHeader
+              badges={[
+                { text: kubernetesResults.adapterMode, variant: "secondary" },
+                { text: `${kubernetesResults.events.length} events`, variant: "outline" },
+                { text: kubernetesResults.namespace, variant: "outline" },
+              ]}
+              headline={kubernetesResults.summary.headline}
+              caption={kubernetesResults.querySummary}
+            />
+            <div className="grid gap-4 lg:grid-cols-2">
+              <SimpleListCard title="Likely impact" items={kubernetesResults.summary.likelyImpact} />
+              <SimpleListCard
+                title="Recommended next steps"
+                items={kubernetesResults.summary.recommendedNextSteps}
+              />
+            </div>
+            <div className="space-y-3">
+              {kubernetesResults.events.map((event) => (
+                <article className="rounded-xl border bg-muted/20 p-4" key={event.id}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={event.level === "Warning" ? "warning" : "outline"}>
+                      {event.level}
+                    </Badge>
+                    <span className="text-sm font-semibold">
+                      {event.kind}/{event.name}
+                    </span>
+                    <span className="text-xs text-muted-foreground">{event.reason}</span>
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">{event.message}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">{event.eventTime}</p>
+                </article>
+              ))}
+            </div>
+            <Button
+              onClick={() =>
+                void handleSaveEvidenceToInvestigation({
+                  environmentId: kubernetesResults.environmentId,
+                  evidenceType: "kubernetes_events",
+                  title: `Kubernetes events ${kubernetesResults.namespace}`,
+                  summary: kubernetesResults.summary.headline,
+                  contentJson: JSON.stringify(kubernetesResults),
+                })
+              }
+              disabled={isAttachingInvestigation}
+            >
+              {isAttachingInvestigation ? "Saving..." : "Attach Events To Investigation"}
+            </Button>
+          </div>
+        ) : null}
       </SectionCard>
 
       <SectionCard
@@ -373,6 +559,20 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
                 ))
               )}
             </div>
+            <Button
+              onClick={() =>
+                void handleSaveEvidenceToInvestigation({
+                  environmentId: logResults.environmentId,
+                  evidenceType: "log_search",
+                  title: `Log search ${logResults.environmentId}`,
+                  summary: logResults.summary.headline,
+                  contentJson: JSON.stringify(logResults),
+                })
+              }
+              disabled={isAttachingInvestigation}
+            >
+              {isAttachingInvestigation ? "Saving..." : "Attach Logs To Investigation"}
+            </Button>
           </div>
         ) : null}
       </SectionCard>
@@ -492,6 +692,20 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
                   ))}
                 </div>
               </div>
+              <Button
+                onClick={() =>
+                  void handleSaveEvidenceToInvestigation({
+                    environmentId: sshResults.environmentId,
+                    evidenceType: "ssh_diagnostics",
+                    title: `SSH diagnostics ${sshResults.targetHost}`,
+                    summary: sshResults.summaryHeadline,
+                    contentJson: JSON.stringify(sshResults),
+                  })
+                }
+                disabled={isAttachingInvestigation}
+              >
+                {isAttachingInvestigation ? "Saving..." : "Attach SSH Evidence To Investigation"}
+              </Button>
             </div>
           ) : null}
         </SectionCard>
@@ -770,6 +984,13 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
     setSshFilters((current) => ({ ...current, [key]: value }));
   }
 
+  function updateKubernetesFilter<Key extends keyof ListKubernetesEventsInput>(
+    key: Key,
+    value: ListKubernetesEventsInput[Key],
+  ) {
+    setKubernetesFilters((current) => ({ ...current, [key]: value }));
+  }
+
   function updateNacosFilter<Key extends keyof CompareNacosConfigInput>(
     key: Key,
     value: CompareNacosConfigInput[Key],
@@ -784,6 +1005,15 @@ function normalizeNacosInput(input: CompareNacosConfigInput): CompareNacosConfig
     dataId: input.dataId.trim(),
     group: input.group.trim(),
     namespaceId: input.namespaceId?.trim() || undefined,
+  };
+}
+
+function normalizeKubernetesInput(input: ListKubernetesEventsInput): ListKubernetesEventsInput {
+  return {
+    ...input,
+    namespace: input.namespace.trim() || "default",
+    involvedObject: input.involvedObject?.trim() || undefined,
+    reason: input.reason?.trim() || undefined,
   };
 }
 

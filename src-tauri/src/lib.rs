@@ -55,6 +55,7 @@ pub fn run() {
             commands::investigations::generate_investigation_report,
             commands::investigations::save_investigation_evidence,
             commands::chat::send_chat_message,
+            commands::kubernetes::list_kubernetes_events,
             commands::logs::search_logs,
             commands::nacos::compare_nacos_config,
             commands::ssh::run_ssh_diagnostics,

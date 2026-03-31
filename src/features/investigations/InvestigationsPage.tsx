@@ -162,6 +162,37 @@ export function InvestigationsPage() {
         </SectionCard>
 
         <SectionCard
+          eyebrow="Correlation"
+          title="Cross-Source Insights"
+          description="Saved evidence is compared across sources so likely relationships show up before you read the full raw payloads."
+        >
+          <div className="space-y-4">
+            {detail === null ? (
+              <p className="text-sm text-muted-foreground">Choose an investigation to inspect correlations.</p>
+            ) : detail.correlations.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No cross-source correlations detected yet. Save logs, Kubernetes events, SSH, and config drift into the same investigation to enrich this view.
+              </p>
+            ) : (
+              detail.correlations.map((item) => (
+                <article className="rounded-xl border bg-background/80 p-4" key={item.id}>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-sm font-semibold">{item.title}</p>
+                    <Badge variant={item.confidence === "high" ? "success" : "warning"}>
+                      {item.confidence}
+                    </Badge>
+                  </div>
+                  <p className="mt-3 text-sm leading-6 text-muted-foreground">{item.detail}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Linked evidence: {item.linkedEvidenceIds.join(", ")}
+                  </p>
+                </article>
+              ))
+            )}
+          </div>
+        </SectionCard>
+
+        <SectionCard
           eyebrow="Evidence"
           title="Evidence Collection"
           description="Each saved item remains visible as source material for the generated report."

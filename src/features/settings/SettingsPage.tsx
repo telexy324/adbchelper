@@ -385,6 +385,12 @@ export function SettingsPage({
                   Password auth is not wired yet in execution mode.
                 </p>
               ) : null}
+              {profileDraft.profileType === "kubernetes" ? (
+                <p className="text-xs leading-5 text-muted-foreground">
+                  Kubernetes local execution supports{" "}
+                  <code>{"{\"kubeconfigPath\":\"/Users/you/.kube/config\",\"context\":\"prod-cluster\"}"}</code>.
+                </p>
+              ) : null}
               {profileDraft.profileType === "nacos" ? (
                 <p className="text-xs leading-5 text-muted-foreground">
                   Nacos supports <code>{"{\"apiVersion\":\"v1\",\"authMode\":\"basic\",\"namespaceId\":\"public\"}"}</code> or{" "}
