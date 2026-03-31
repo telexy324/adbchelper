@@ -62,18 +62,19 @@ export function App() {
   const [environments, setEnvironments] = useState<EnvironmentProfile[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function bootstrap() {
-      try {
-        const [health, envs] = await Promise.all([getAppHealth(), listEnvironments()]);
-        setAppHealth(health);
-        setEnvironments(envs);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown bootstrap error";
-        setLoadError(message);
-      }
+  async function bootstrap() {
+    try {
+      const [health, envs] = await Promise.all([getAppHealth(), listEnvironments()]);
+      setAppHealth(health);
+      setEnvironments(envs);
+      setLoadError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown bootstrap error";
+      setLoadError(message);
     }
+  }
 
+  useEffect(() => {
     void bootstrap();
   }, []);
 
@@ -175,7 +176,7 @@ export function App() {
             {activeSection === "resources" ? <ResourcesPage environments={environments} /> : null}
             {activeSection === "investigations" ? <InvestigationsPage /> : null}
             {activeSection === "settings" ? (
-              <SettingsPage appHealth={appHealth} environments={environments} />
+              <SettingsPage appHealth={appHealth} environments={environments} onRefreshEnvironments={bootstrap} />
             ) : null}
           </main>
         </div>

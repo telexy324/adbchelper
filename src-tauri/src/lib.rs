@@ -1,5 +1,7 @@
 mod commands;
+mod llm;
 mod models;
+mod orchestrator;
 mod storage;
 
 use std::path::PathBuf;
@@ -42,7 +44,16 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app::get_app_health,
-            commands::app::list_environments
+            commands::app::list_environments,
+            commands::chat::list_chat_sessions,
+            commands::chat::list_chat_messages,
+            commands::chat::list_tool_catalog,
+            commands::chat::send_chat_message,
+            commands::settings::save_environment,
+            commands::settings::list_connection_profiles,
+            commands::settings::validate_connection_profile,
+            commands::settings::save_connection_profile,
+            commands::settings::clear_connection_profile_secret
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
