@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans:
+    "Geist", "IBM Plex Sans", "SF Pro Display", "Segoe UI", sans-serif;
+  --font-serif: "Newsreader", "Iowan Old Style", "Georgia", serif;
+  --color-background: oklch(0.985 0.002 95);
+  --color-foreground: oklch(0.18 0.01 260);
+  --color-card: oklch(1 0 0);
+  --color-card-foreground: oklch(0.18 0.01 260);
+  --color-popover: oklch(1 0 0);
+  --color-popover-foreground: oklch(0.18 0.01 260);
+  --color-primary: oklch(0.24 0.02 250);
+  --color-primary-foreground: oklch(0.98 0.002 95);
+  --color-secondary: oklch(0.96 0.004 240);
+  --color-secondary-foreground: oklch(0.24 0.02 250);
+  --color-muted: oklch(0.96 0.004 240);
+  --color-muted-foreground: oklch(0.48 0.015 255);
+  --color-accent: oklch(0.94 0.014 220);
+  --color-accent-foreground: oklch(0.24 0.02 250);
+  --color-destructive: oklch(0.57 0.2 27);
+  --color-destructive-foreground: oklch(0.98 0.002 95);
+  --color-border: oklch(0.91 0.006 250);
+  --color-input: oklch(0.91 0.006 250);
+  --color-ring: oklch(0.7 0.02 250);
+  --radius: 0.85rem;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    min-height: 100vh;
+    background-image:
+      radial-gradient(circle at top left, rgba(173, 196, 255, 0.2), transparent 22%),
+      radial-gradient(circle at bottom right, rgba(183, 225, 205, 0.28), transparent 26%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(248, 250, 252, 0.94));
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply tracking-tight;
+  }
+}
+
+@layer utilities {
+  .surface-grid {
+    background-image:
+      linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+}
