@@ -15,7 +15,7 @@ export function SectionCard({
   children,
 }: SectionCardProps) {
   return (
-    <Card className="border-border/70 bg-card/90 shadow-[0_20px_80px_-38px_rgba(15,23,42,0.35)]">
+    <Card className="border-white/45 bg-card/82 shadow-[0_24px_90px_-42px_rgba(14,116,144,0.45)] backdrop-blur-xl">
       <CardHeader className="space-y-3">
         <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">{eyebrow}</p>
         <CardTitle className="font-serif text-2xl">{title}</CardTitle>

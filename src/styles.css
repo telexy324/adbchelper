@@ -4,25 +4,25 @@
   --font-sans:
     "Geist", "IBM Plex Sans", "SF Pro Display", "Segoe UI", sans-serif;
   --font-serif: "Newsreader", "Iowan Old Style", "Georgia", serif;
-  --color-background: oklch(0.985 0.002 95);
-  --color-foreground: oklch(0.18 0.01 260);
-  --color-card: oklch(1 0 0);
-  --color-card-foreground: oklch(0.18 0.01 260);
-  --color-popover: oklch(1 0 0);
-  --color-popover-foreground: oklch(0.18 0.01 260);
-  --color-primary: oklch(0.24 0.02 250);
-  --color-primary-foreground: oklch(0.98 0.002 95);
-  --color-secondary: oklch(0.96 0.004 240);
-  --color-secondary-foreground: oklch(0.24 0.02 250);
-  --color-muted: oklch(0.96 0.004 240);
-  --color-muted-foreground: oklch(0.48 0.015 255);
-  --color-accent: oklch(0.94 0.014 220);
-  --color-accent-foreground: oklch(0.24 0.02 250);
+  --color-background: oklch(0.97 0.018 198);
+  --color-foreground: oklch(0.24 0.045 240);
+  --color-card: oklch(0.995 0.012 190);
+  --color-card-foreground: oklch(0.24 0.045 240);
+  --color-popover: oklch(0.995 0.012 190);
+  --color-popover-foreground: oklch(0.24 0.045 240);
+  --color-primary: oklch(0.56 0.15 216);
+  --color-primary-foreground: oklch(0.98 0.01 196);
+  --color-secondary: oklch(0.94 0.04 205);
+  --color-secondary-foreground: oklch(0.26 0.05 240);
+  --color-muted: oklch(0.95 0.025 200);
+  --color-muted-foreground: oklch(0.47 0.04 232);
+  --color-accent: oklch(0.9 0.08 84);
+  --color-accent-foreground: oklch(0.28 0.05 58);
   --color-destructive: oklch(0.57 0.2 27);
-  --color-destructive-foreground: oklch(0.98 0.002 95);
-  --color-border: oklch(0.91 0.006 250);
-  --color-input: oklch(0.91 0.006 250);
-  --color-ring: oklch(0.7 0.02 250);
+  --color-destructive-foreground: oklch(0.98 0.01 196);
+  --color-border: oklch(0.86 0.035 218);
+  --color-input: oklch(0.86 0.035 218);
+  --color-ring: oklch(0.66 0.13 216);
   --radius: 0.85rem;
 }
 
@@ -35,9 +35,11 @@
     @apply bg-background text-foreground font-sans antialiased;
     min-height: 100vh;
     background-image:
-      radial-gradient(circle at top left, rgba(173, 196, 255, 0.2), transparent 22%),
-      radial-gradient(circle at bottom right, rgba(183, 225, 205, 0.28), transparent 26%),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(248, 250, 252, 0.94));
+      radial-gradient(circle at 12% 16%, rgba(14, 165, 233, 0.24), transparent 24%),
+      radial-gradient(circle at 82% 18%, rgba(251, 191, 36, 0.22), transparent 18%),
+      radial-gradient(circle at 80% 82%, rgba(34, 197, 94, 0.18), transparent 24%),
+      radial-gradient(circle at 18% 88%, rgba(244, 114, 182, 0.14), transparent 20%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(235, 248, 250, 0.95));
   }
 
   h1,
@@ -51,8 +53,8 @@
 @layer utilities {
   .surface-grid {
     background-image:
-      linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+      linear-gradient(rgba(14, 116, 144, 0.07) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(14, 116, 144, 0.07) 1px, transparent 1px);
     background-size: 24px 24px;
   }
 }

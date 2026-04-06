@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
 import {
-  ArrowRight,
   Bot,
   ClipboardList,
   Database,
-  LayoutDashboard,
   ServerCog,
   ShieldCheck,
   ShieldEllipsis,
@@ -15,9 +13,7 @@ import { InvestigationsPage } from "./features/investigations/InvestigationsPage
 import { ResourcesPage } from "./features/resources/ResourcesPage";
 import { SettingsPage } from "./features/settings/SettingsPage";
 import { getAppHealth, listEnvironments } from "./lib/tauri";
-import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
 import type {
   AppHealth,
   AppSection,
@@ -26,12 +22,6 @@ import type {
 } from "./types/domain";
 
 const navigationItems: NavigationItem[] = [
-  {
-    id: "overview",
-    label: "Overview",
-    description: "Roadmap and system foundation",
-    icon: LayoutDashboard,
-  },
   {
     id: "chat",
     label: "Chat",
@@ -65,7 +55,7 @@ const navigationItems: NavigationItem[] = [
 ];
 
 export function App() {
-  const [activeSection, setActiveSection] = useState<AppSection>("overview");
+  const [activeSection, setActiveSection] = useState<AppSection>("resources");
   const [appHealth, setAppHealth] = useState<AppHealth | null>(null);
   const [environments, setEnvironments] = useState<EnvironmentProfile[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -86,13 +76,22 @@ export function App() {
     void bootstrap();
   }, []);
 
+  const activeItem = navigationItems.find((item) => item.id === activeSection) ?? navigationItems[0];
+  const environmentCount = environments.length;
+  const enabledLabels = [
+    environments.some((environment) => environment.kubernetesEnabled) ? "Kubernetes" : null,
+    environments.some((environment) => environment.elkEnabled) ? "ELK" : null,
+    environments.some((environment) => environment.sshEnabled) ? "SSH" : null,
+    environments.some((environment) => environment.nacosEnabled) ? "Nacos" : null,
+  ].filter(Boolean) as string[];
+
   return (
     <div className="min-h-screen bg-background">
       <div className="surface-grid min-h-screen">
         <div className="mx-auto grid min-h-screen max-w-[1600px] gap-6 p-6 xl:grid-cols-[290px_minmax(0,1fr)]">
-          <aside className="flex flex-col gap-5 rounded-3xl border bg-card/80 p-5 shadow-sm backdrop-blur">
+          <aside className="flex flex-col gap-5 rounded-[2rem] border border-white/45 bg-card/75 p-5 shadow-[0_28px_90px_-42px_rgba(14,116,144,0.55)] backdrop-blur-xl">
             <div className="space-y-4">
-              <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
+              <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-[0_14px_38px_-16px_rgba(14,116,144,0.9)]">
                 <Database className="h-5 w-5" />
               </div>
               <div className="space-y-2">
@@ -113,17 +112,17 @@ export function App() {
                 return (
                   <button
                     className={[
-                      "flex items-start gap-3 rounded-xl border px-4 py-3 text-left transition",
+                      "flex items-start gap-3 rounded-2xl border px-4 py-3 text-left transition duration-200",
                       item.id === activeSection
-                        ? "border-primary/20 bg-primary/5 shadow-sm"
-                        : "border-transparent hover:border-border hover:bg-muted/60",
+                        ? "border-cyan-400/40 bg-gradient-to-r from-cyan-500/15 via-sky-500/10 to-amber-400/15 shadow-[0_18px_44px_-28px_rgba(14,116,144,0.9)]"
+                        : "border-transparent hover:border-cyan-900/10 hover:bg-white/50",
                     ].join(" ")}
                     key={item.id}
                     onClick={() => setActiveSection(item.id)}
                     type="button"
                   >
-                    <span className="mt-0.5 rounded-md bg-muted p-2">
-                      <Icon className="h-4 w-4 text-foreground" />
+                    <span className="mt-0.5 rounded-xl bg-white/70 p-2 shadow-sm ring-1 ring-white/60">
+                      <Icon className="h-4 w-4 text-foreground/90" />
                     </span>
                     <span className="block">
                       <span className="block text-sm font-medium">{item.label}</span>
@@ -135,51 +134,49 @@ export function App() {
                 );
               })}
             </nav>
-            <Card className="mt-auto border-dashed bg-muted/40">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Current phase</CardTitle>
-                <CardDescription>Week 1 foundation is live and ready for Qwen integration.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Badge variant="secondary">10-week roadmap</Badge>
-                <p className="text-sm leading-6 text-muted-foreground">
-                  Next we can wire environment forms, model settings, and typed tool execution.
-                </p>
-              </CardContent>
-            </Card>
           </aside>
           <main className="flex min-h-[calc(100vh-3rem)] flex-col gap-6">
-            <header className="rounded-3xl border bg-card/85 p-6 shadow-sm backdrop-blur">
-              <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <header className="overflow-hidden rounded-[2rem] border border-white/45 bg-card/72 p-6 shadow-[0_30px_90px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl">
+              <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-400/70 to-transparent" />
+              <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
                 <div className="space-y-3">
-                  <Badge variant="outline">10-week MVP kickoff</Badge>
+                  <Badge className="border-0 bg-cyan-500/12 text-cyan-900 hover:bg-cyan-500/12">
+                    {activeItem.label}
+                  </Badge>
                   <div className="space-y-2">
-                    <h2 className="font-serif text-4xl leading-tight">
-                      Foundation for the full desktop app starts here
-                    </h2>
+                    <h2 className="font-serif text-4xl leading-tight">{activeItem.description}</h2>
                     <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-                      The shell, runtime bridge, local database, and seeded environment model are in
-                      place so we can build the real ops workflows on top.
+                      Work directly with the live tools that are already wired into the desktop app.
                     </p>
                   </div>
                 </div>
-                <div className="flex flex-col gap-3">
-                  <div className="inline-flex items-center gap-2 rounded-full border bg-background px-4 py-2 text-sm text-muted-foreground">
-                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                <div className="flex flex-col gap-3 lg:items-end">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-white/60 bg-white/70 px-4 py-2 text-sm text-muted-foreground shadow-sm">
+                    <span
+                      className={[
+                        "h-2.5 w-2.5 rounded-full",
+                        loadError ? "bg-rose-500" : "bg-emerald-500",
+                      ].join(" ")}
+                    />
                     {loadError
                       ? `Bootstrap issue: ${loadError}`
                       : appHealth
                         ? `Runtime ready · SQLite ${appHealth.databaseReady ? "initialized" : "pending"}`
                         : "Bootstrapping runtime..."}
                   </div>
-                  <div className="flex flex-wrap gap-3">
-                    <Button>Continue Week 2 <ArrowRight className="h-4 w-4" /></Button>
-                    <Button variant="outline">Open Roadmap</Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="secondary" className="bg-amber-400/16 text-amber-950">
+                      {environmentCount} environment{environmentCount === 1 ? "" : "s"}
+                    </Badge>
+                    {enabledLabels.slice(0, 4).map((label) => (
+                      <Badge key={label} variant="secondary" className="bg-sky-500/10 text-sky-950">
+                        {label}
+                      </Badge>
+                    ))}
                   </div>
                 </div>
               </div>
             </header>
-            {activeSection === "overview" ? <OverviewPage environments={environments} /> : null}
             {activeSection === "chat" ? <ChatPage /> : null}
             {activeSection === "resources" ? <ResourcesPage environments={environments} /> : null}
             {activeSection === "investigations" ? <InvestigationsPage /> : null}
@@ -190,70 +187,6 @@ export function App() {
           </main>
         </div>
       </div>
-    </div>
-  );
-}
-
-function OverviewPage({ environments }: { environments: EnvironmentProfile[] }) {
-  return (
-    <div className="grid gap-6">
-      <Card className="overflow-hidden">
-        <CardHeader className="gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="space-y-2">
-            <p className="text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground">
-              What this scaffold gives us
-            </p>
-            <CardTitle className="font-serif text-3xl">
-              Week 1 of the 10-week roadmap is now represented in code
-            </CardTitle>
-            <CardDescription className="max-w-3xl text-sm leading-6">
-              The app already has a desktop shell, local runtime bridge, database bootstrapping, and
-              seeded environments that map to your real ops systems.
-            </CardDescription>
-          </div>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <MetricCard label="Screens" value="5" />
-            <MetricCard label="Environments" value={String(environments.length)} />
-            <MetricCard label="Runtime" value="Tauri" />
-            <MetricCard label="Storage" value="SQLite" />
-          </div>
-        </CardHeader>
-      </Card>
-      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle className="font-serif text-2xl">Current scope</CardTitle>
-            <CardDescription>These are the core assets already in place for the first milestone.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ul className="space-y-3 text-sm leading-6 text-muted-foreground">
-              <li>Desktop shell with dedicated pages for chat, resources, investigations, and settings</li>
-              <li>Tauri backend foundation with app health and local SQLite initialization</li>
-              <li>Seed environment profiles so we can build connection forms and adapters next</li>
-            </ul>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="font-serif text-2xl">Roadmap bands</CardTitle>
-            <CardDescription>The product is organized into the same development slices we discussed.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <MilestoneRow phase="Weeks 2-3" title="Environment Profiles and Qwen Chat" body="Credential management, settings forms, model client, and tool orchestration" />
-            <MilestoneRow phase="Weeks 4-7" title="Integrations" body="Kubernetes, ELK, SSH diagnostics, and Nacos config diff" />
-            <MilestoneRow phase="Weeks 8-10" title="Investigation and Safety" body="Report generation, approval flows, hardening, and packaging" />
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function MetricCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border bg-muted/40 px-4 py-3">
-      <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{label}</p>
-      <p className="mt-2 text-lg font-semibold">{value}</p>
     </div>
   );
 }
