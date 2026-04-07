@@ -63,6 +63,7 @@ pub fn run() {
             commands::kubernetes::list_kubernetes_events,
             commands::logs::search_logs,
             commands::nacos::compare_nacos_config,
+            commands::redis::analyze_redis,
             commands::ssh::run_ssh_diagnostics,
             commands::settings::save_environment,
             commands::settings::list_connection_profiles,

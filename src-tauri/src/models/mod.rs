@@ -7,4 +7,5 @@ pub mod investigation;
 pub mod kubernetes;
 pub mod logs;
 pub mod nacos;
+pub mod redis;
 pub mod ssh;

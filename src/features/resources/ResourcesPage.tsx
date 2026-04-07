@@ -4,6 +4,7 @@ import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import {
+  analyzeRedis,
   attachToolEvidence,
   compareNacosConfig,
   listKubernetesEvents,
@@ -24,6 +25,8 @@ import type {
   LogSearchInput,
   LogSearchResponse,
   LogTimeRange,
+  AnalyzeRedisInput,
+  AnalyzeRedisResponse,
   SshCommandPreset,
   SshDiagnosticsInput,
   SshDiagnosticsResponse,
@@ -71,10 +74,16 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
     group: "DEFAULT_GROUP",
     namespaceId: "",
   });
+  const [redisFilters, setRedisFilters] = useState<AnalyzeRedisInput>({
+    environmentId: defaultEnvironmentId,
+    instanceName: "",
+    timeRange: "1h",
+  });
   const [logResults, setLogResults] = useState<LogSearchResponse | null>(null);
   const [sshResults, setSshResults] = useState<SshDiagnosticsResponse | null>(null);
   const [kubernetesResults, setKubernetesResults] = useState<ListKubernetesEventsResponse | null>(null);
   const [nacosResults, setNacosResults] = useState<CompareNacosConfigResponse | null>(null);
+  const [redisResults, setRedisResults] = useState<AnalyzeRedisResponse | null>(null);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [investigations, setInvestigations] = useState<InvestigationSummary[]>([]);
   const [attachChatSessionId, setAttachChatSessionId] = useState<string>("new");
@@ -84,11 +93,13 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
   const [sshStatusMessage, setSshStatusMessage] = useState<string | null>(null);
   const [kubernetesStatusMessage, setKubernetesStatusMessage] = useState<string | null>(null);
   const [nacosStatusMessage, setNacosStatusMessage] = useState<string | null>(null);
+  const [redisStatusMessage, setRedisStatusMessage] = useState<string | null>(null);
   const [attachStatusMessage, setAttachStatusMessage] = useState<string | null>(null);
   const [isLogLoading, setIsLogLoading] = useState(false);
   const [isSshLoading, setIsSshLoading] = useState(false);
   const [isKubernetesLoading, setIsKubernetesLoading] = useState(false);
   const [isNacosLoading, setIsNacosLoading] = useState(false);
+  const [isRedisLoading, setIsRedisLoading] = useState(false);
   const [isAttachingChat, setIsAttachingChat] = useState(false);
   const [isAttachingInvestigation, setIsAttachingInvestigation] = useState(false);
 
@@ -114,6 +125,10 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
       sourceEnvironmentId: current.sourceEnvironmentId || environments[0].id,
       targetEnvironmentId:
         current.targetEnvironmentId || environments[environments.length - 1]?.id || environments[0].id,
+    }));
+    setRedisFilters((current) => ({
+      ...current,
+      environmentId: current.environmentId || environments[0].id,
     }));
   }, [environments]);
 
@@ -141,6 +156,11 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
       namespace: kubernetesFilters.namespace,
       involvedObject: kubernetesFilters.involvedObject,
       reason: kubernetesFilters.reason,
+    });
+    void runRedisAnalyze({
+      environmentId: redisFilters.environmentId || environments[0].id,
+      instanceName: redisFilters.instanceName,
+      timeRange: redisFilters.timeRange,
     });
   }, []);
 
@@ -207,6 +227,22 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
       );
     } finally {
       setIsNacosLoading(false);
+    }
+  }
+
+  async function runRedisAnalyze(input: AnalyzeRedisInput) {
+    setIsRedisLoading(true);
+    setRedisStatusMessage(null);
+    try {
+      const response = await analyzeRedis(input);
+      setRedisResults(response);
+      setRedisStatusMessage(
+        `Loaded Redis analysis for ${response.instanceName} via ${response.adapterMode}.`,
+      );
+    } catch (error) {
+      setRedisStatusMessage(error instanceof Error ? error.message : "Failed to analyze Redis.");
+    } finally {
+      setIsRedisLoading(false);
     }
   }
 
@@ -340,6 +376,11 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
             title="Nacos Config Diff"
             body="Compare environment configuration drift and surface likely impact before rollout or incident response."
           />
+          <SummaryTile
+            label="Redis"
+            title="Redis Analysis"
+            body="Review INFO health, slow queries, response-time spikes, and Redis log warnings in one workbench."
+          />
         </div>
       </SectionCard>
 
@@ -448,6 +489,169 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
               disabled={isAttachingInvestigation}
             >
               {isAttachingInvestigation ? "Saving..." : "Attach Events To Investigation"}
+            </Button>
+          </div>
+        ) : null}
+      </SectionCard>
+
+      <SectionCard
+        eyebrow="Redis"
+        title="Redis Analysis Workbench"
+        description="Review runtime health, slowlog hotspots, response-time trends, and Redis-side warnings before they turn into application outages."
+      >
+        <div className="grid gap-4 md:grid-cols-3">
+          <Field label="Environment">
+            <select
+              className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
+              value={redisFilters.environmentId}
+              onChange={(event) => updateRedisFilter("environmentId", event.target.value)}
+            >
+              {environments.map((environment) => (
+                <option key={environment.id} value={environment.id}>
+                  {environment.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Instance name">
+            <Input
+              placeholder="payment-redis-main"
+              value={redisFilters.instanceName}
+              onChange={(event) => updateRedisFilter("instanceName", event.target.value)}
+            />
+          </Field>
+          <Field label="Time range">
+            <select
+              className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
+              value={redisFilters.timeRange}
+              onChange={(event) => updateRedisFilter("timeRange", event.target.value as LogTimeRange)}
+            >
+              {timeRangeOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <ActionRow
+          primaryLabel={isRedisLoading ? "Analyzing..." : "Analyze Redis"}
+          onPrimary={() => void runRedisAnalyze(redisFilters)}
+          primaryDisabled={isRedisLoading}
+          onReset={() => {
+            const nextFilters: AnalyzeRedisInput = {
+              environmentId: redisFilters.environmentId || defaultEnvironmentId,
+              instanceName: "",
+              timeRange: "1h",
+            };
+            setRedisFilters(nextFilters);
+            void runRedisAnalyze(nextFilters);
+          }}
+          resetLabel="Reset Redis"
+        />
+        {redisStatusMessage ? <p className="text-sm text-muted-foreground">{redisStatusMessage}</p> : null}
+        {redisResults ? (
+          <div className="space-y-4">
+            <ResultHeader
+              badges={[
+                { text: redisResults.adapterMode, variant: "secondary" },
+                { text: redisResults.instanceName, variant: "outline" },
+                { text: redisResults.timeRange, variant: "outline" },
+              ]}
+              headline={redisResults.summary.headline}
+              caption={redisResults.executedPlan}
+            />
+            <div className="grid gap-4 lg:grid-cols-2">
+              <SimpleListCard title="Likely causes" items={redisResults.summary.likelyCauses} />
+              <SimpleListCard
+                title="Recommended next steps"
+                items={redisResults.summary.recommendedNextSteps}
+              />
+            </div>
+            <div className="grid gap-4 xl:grid-cols-2">
+              <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
+                <p className="text-sm font-semibold">INFO health</p>
+                {redisResults.infoMetrics.map((metric) => (
+                  <article className="rounded-lg border bg-background/80 p-3" key={metric.label}>
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        variant={
+                          metric.status === "healthy"
+                            ? "success"
+                            : metric.status === "warning"
+                              ? "warning"
+                              : "danger"
+                        }
+                      >
+                        {metric.status}
+                      </Badge>
+                      <span className="text-sm font-semibold">{metric.label}</span>
+                      <span className="text-xs text-muted-foreground">{metric.value}</span>
+                    </div>
+                    <p className="mt-2 text-sm text-muted-foreground">{metric.detail}</p>
+                  </article>
+                ))}
+              </div>
+              <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
+                <p className="text-sm font-semibold">Slow queries</p>
+                {redisResults.slowQueries.map((query) => (
+                  <article className="rounded-lg border bg-background/80 p-3" key={query.id}>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="warning">{query.command}</Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {query.durationMicros.toLocaleString()}us
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm text-muted-foreground">{query.keySample}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {query.client} · {query.timestamp}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            </div>
+            <div className="grid gap-4 xl:grid-cols-2">
+              <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
+                <p className="text-sm font-semibold">Response time trend</p>
+                {redisResults.latencyPoints.map((point) => (
+                  <article className="rounded-lg border bg-background/80 p-3" key={point.timestamp}>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-medium">{point.timestamp}</span>
+                      <span className="text-xs text-muted-foreground">
+                        avg {point.avgMs.toFixed(1)}ms · p95 {point.p95Ms.toFixed(1)}ms
+                      </span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
+                <p className="text-sm font-semibold">Redis log warnings</p>
+                {redisResults.logLines.map((line, index) => (
+                  <article className="rounded-lg border bg-background/80 p-3" key={`${line.timestamp}-${index}`}>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={line.level === "WARNING" ? "warning" : "outline"}>
+                        {line.level}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">{line.timestamp}</span>
+                    </div>
+                    <p className="mt-2 text-sm text-muted-foreground">{line.message}</p>
+                  </article>
+                ))}
+              </div>
+            </div>
+            <Button
+              onClick={() =>
+                void handleSaveEvidenceToInvestigation({
+                  environmentId: redisResults.environmentId,
+                  evidenceType: "redis_analysis",
+                  title: `Redis analysis ${redisResults.instanceName}`,
+                  summary: redisResults.summary.headline,
+                  contentJson: JSON.stringify(redisResults),
+                })
+              }
+              disabled={isAttachingInvestigation}
+            >
+              {isAttachingInvestigation ? "Saving..." : "Attach Redis Analysis To Investigation"}
             </Button>
           </div>
         ) : null}
@@ -1006,6 +1210,13 @@ function normalizeNacosInput(input: CompareNacosConfigInput): CompareNacosConfig
     group: input.group.trim(),
     namespaceId: input.namespaceId?.trim() || undefined,
   };
+}
+
+function updateRedisFilter<Key extends keyof AnalyzeRedisInput>(
+  key: Key,
+  value: AnalyzeRedisInput[Key],
+) {
+  // placeholder for patch context
 }
 
 function normalizeKubernetesInput(input: ListKubernetesEventsInput): ListKubernetesEventsInput {

@@ -270,6 +270,59 @@ export interface CompareNacosConfigResponse {
   summary: NacosDiffSummary;
 }
 
+export interface AnalyzeRedisInput {
+  environmentId: string;
+  instanceName?: string;
+  timeRange: LogTimeRange;
+}
+
+export interface RedisInfoMetric {
+  label: string;
+  value: string;
+  status: string;
+  detail: string;
+}
+
+export interface RedisSlowQuery {
+  id: string;
+  timestamp: string;
+  durationMicros: number;
+  command: string;
+  keySample: string;
+  client: string;
+}
+
+export interface RedisLatencyPoint {
+  timestamp: string;
+  avgMs: number;
+  p95Ms: number;
+}
+
+export interface RedisLogLine {
+  timestamp: string;
+  level: string;
+  message: string;
+}
+
+export interface RedisSummary {
+  headline: string;
+  likelyCauses: string[];
+  recommendedNextSteps: string[];
+}
+
+export interface AnalyzeRedisResponse {
+  environmentId: string;
+  instanceName: string;
+  timeRange: LogTimeRange;
+  adapterMode: string;
+  executedPlan: string;
+  infoMetrics: RedisInfoMetric[];
+  slowQueries: RedisSlowQuery[];
+  latencyPoints: RedisLatencyPoint[];
+  logLines: RedisLogLine[];
+  summary: RedisSummary;
+}
+
 export interface InvestigationSummary {
   id: string;
   title: string;

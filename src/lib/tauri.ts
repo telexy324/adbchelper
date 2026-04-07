@@ -5,6 +5,8 @@ import type {
   CreateApprovalInput,
   ExecuteApprovalInput,
   AttachToolEvidenceInput,
+  AnalyzeRedisInput,
+  AnalyzeRedisResponse,
   CompareNacosConfigInput,
   CompareNacosConfigResponse,
   ChatResponse,
@@ -153,4 +155,8 @@ export async function compareNacosConfig(
   input: CompareNacosConfigInput,
 ): Promise<CompareNacosConfigResponse> {
   return invoke<CompareNacosConfigResponse>("compare_nacos_config", { input });
+}
+
+export async function analyzeRedis(input: AnalyzeRedisInput): Promise<AnalyzeRedisResponse> {
+  return invoke<AnalyzeRedisResponse>("analyze_redis", { input });
 }

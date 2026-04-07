@@ -38,6 +38,11 @@ pub fn tool_catalog() -> Vec<ToolDefinition> {
             description: "Run approved read-only server diagnostics and review host logs.".to_string(),
             input_hint: "{ environment, host, commandPreset, logPath? }".to_string(),
         },
+        ToolDefinition {
+            name: "analyze_redis_instance".to_string(),
+            description: "Review Redis INFO health, slowlog, latency trends, and Redis log warnings.".to_string(),
+            input_hint: "{ environment, instanceName?, timeRange }".to_string(),
+        },
     ]
 }
 
