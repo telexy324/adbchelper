@@ -1,5 +1,6 @@
 use chrono::Utc;
 use rusqlite::Connection;
+use serde_json::Value;
 
 use crate::llm::qwen::{complete_chat, QwenConfig, QwenMessage};
 use crate::models::chat::{ChatMessage, ChatResponse, ChatSession, SendChatMessageInput, ToolDefinition};
@@ -61,6 +62,14 @@ pub async fn send_message(
     let recent_messages = db::list_chat_messages(&connection, &session.id).map_err(|error| error.to_string())?;
     let qwen_profile = select_qwen_profile(&connection, &input.environment_id)?;
     let api_key = secrets::get_profile_secret(&qwen_profile.id).map_err(|error| error.to_string())?;
+    let qwen_config_json: Value =
+        serde_json::from_str(&qwen_profile.config_json).unwrap_or_else(|_| Value::Object(Default::default()));
+    let content_type = qwen_config_json
+        .get("contentType")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("application/json")
+        .to_string();
     let model = qwen_profile
         .default_scope
         .clone()
@@ -79,6 +88,7 @@ pub async fn send_message(
             base_url: qwen_profile.endpoint.clone(),
             api_key,
             model: model.clone(),
+            content_type,
         },
         qwen_messages,
     )

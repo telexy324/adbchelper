@@ -7,6 +7,7 @@ pub struct QwenConfig {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+    pub content_type: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -48,7 +49,7 @@ pub async fn complete_chat(
     let base = config.base_url.trim_end_matches('/');
     let response = client
         .post(format!("{base}/chat/completions"))
-        .header(CONTENT_TYPE, "application/json")
+        .header(CONTENT_TYPE, &config.content_type)
         .header(AUTHORIZATION, format!("Bearer {}", config.api_key))
         .json(&QwenRequest {
             model: config.model.clone(),

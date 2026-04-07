@@ -65,6 +65,8 @@ type ProfileFormState = {
   redisSlowlogLimit: string;
   qwenModel: string;
   qwenBasePath: string;
+  qwenAppKey: string;
+  qwenContentType: string;
 };
 
 const emptyProfile = (): ProfileFormState => ({
@@ -93,6 +95,8 @@ const emptyProfile = (): ProfileFormState => ({
   redisSlowlogLimit: "5",
   qwenModel: "qwen-plus",
   qwenBasePath: "/compatible-mode/v1",
+  qwenAppKey: "",
+  qwenContentType: "application/json",
 });
 
 export function SettingsPage({
@@ -481,14 +485,16 @@ export function SettingsPage({
             <Field label="Secret value">
               <Input
                 type="password"
-                placeholder="API key, password, or token"
+                placeholder={profileDraft.profileType === "qwen" ? "app_secret" : "API key, password, or token"}
                 value={profileDraft.secretValue}
                 onChange={(event) =>
                   setProfileDraft((current) => ({ ...current, secretValue: event.target.value }))
                 }
               />
               <p className="text-xs leading-5 text-muted-foreground">
-                Use this for passwords, tokens, or API keys. It is stored in the system keychain, not in SQLite.
+                {profileDraft.profileType === "qwen"
+                  ? "Use this field for Qwen app_secret. It is stored in the system keychain, not in SQLite."
+                  : "Use this for passwords, tokens, or API keys. It is stored in the system keychain, not in SQLite."}
               </p>
             </Field>
             <div className="flex flex-wrap gap-3">
@@ -671,6 +677,8 @@ function composeStructuredConfig(draft: ProfileFormState): Record<string, unknow
     case "qwen":
       return {
         basePath: draft.qwenBasePath.trim() || "/compatible-mode/v1",
+        appKey: draft.qwenAppKey.trim() || undefined,
+        contentType: draft.qwenContentType.trim() || "application/json",
       };
     default:
       return {};
@@ -984,6 +992,15 @@ function renderTypeSpecificFields(
     case "qwen":
       return (
         <>
+          <Field label="App key">
+            <Input
+              placeholder="your_qwen_app_key"
+              value={profileDraft.qwenAppKey}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, qwenAppKey: event.target.value }))
+              }
+            />
+          </Field>
           <Field label="Model">
             <Input
               placeholder="qwen-plus"
@@ -1003,6 +1020,15 @@ function renderTypeSpecificFields(
               value={profileDraft.qwenBasePath}
               onChange={(event) =>
                 setProfileDraft((current) => ({ ...current, qwenBasePath: event.target.value }))
+              }
+            />
+          </Field>
+          <Field label="Content-Type">
+            <Input
+              placeholder="application/json"
+              value={profileDraft.qwenContentType}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, qwenContentType: event.target.value }))
               }
             />
           </Field>
@@ -1053,6 +1079,8 @@ function profileToDraft(profile: ConnectionProfile): ProfileFormState {
     redisSlowlogLimit: stringValue(rawConfig.slowlogLimit) || "5",
     qwenModel: profile.defaultScope || "qwen-plus",
     qwenBasePath: stringValue(rawConfig.basePath) || "/compatible-mode/v1",
+    qwenAppKey: stringValue(rawConfig.appKey),
+    qwenContentType: stringValue(rawConfig.contentType) || "application/json",
   };
 }
 
