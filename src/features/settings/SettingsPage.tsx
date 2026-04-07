@@ -37,7 +37,36 @@ const profileTypeOptions: ConnectionProfileType[] = [
   "qwen",
 ];
 
-const emptyProfile: UpsertConnectionProfileInput = {
+type ProfileFormState = {
+  id?: string;
+  environmentId: string;
+  profileType: ConnectionProfileType;
+  name: string;
+  endpoint: string;
+  username: string;
+  defaultScope: string;
+  notes: string;
+  secretValue: string;
+  kubeconfigPath: string;
+  kubeContext: string;
+  sshHost: string;
+  sshPort: string;
+  sshAuthMode: "password" | "key" | "agent";
+  sshPrivateKeyPath: string;
+  elkIndexPattern: string;
+  elkSpace: string;
+  nacosNamespaceId: string;
+  nacosGroup: string;
+  nacosApiVersion: "v1" | "v2";
+  nacosAuthMode: "basic" | "accessToken";
+  redisDatabase: string;
+  redisTlsEnabled: boolean;
+  redisSlowlogLimit: string;
+  qwenModel: string;
+  qwenBasePath: string;
+};
+
+const emptyProfile = (): ProfileFormState => ({
   environmentId: "dev",
   profileType: "kubernetes",
   name: "",
@@ -45,9 +74,25 @@ const emptyProfile: UpsertConnectionProfileInput = {
   username: "",
   defaultScope: "",
   notes: "",
-  configJson: "{}",
   secretValue: "",
-};
+  kubeconfigPath: "",
+  kubeContext: "",
+  sshHost: "",
+  sshPort: "22",
+  sshAuthMode: "password",
+  sshPrivateKeyPath: "",
+  elkIndexPattern: "",
+  elkSpace: "",
+  nacosNamespaceId: "",
+  nacosGroup: "DEFAULT_GROUP",
+  nacosApiVersion: "v1",
+  nacosAuthMode: "basic",
+  redisDatabase: "0",
+  redisTlsEnabled: false,
+  redisSlowlogLimit: "5",
+  qwenModel: "qwen-plus",
+  qwenBasePath: "/compatible-mode/v1",
+});
 
 export function SettingsPage({
   appHealth,
@@ -56,7 +101,7 @@ export function SettingsPage({
 }: SettingsPageProps) {
   const [environmentDrafts, setEnvironmentDrafts] = useState<UpsertEnvironmentInput[]>([]);
   const [connectionProfiles, setConnectionProfiles] = useState<ConnectionProfile[]>([]);
-  const [profileDraft, setProfileDraft] = useState<UpsertConnectionProfileInput>(emptyProfile);
+  const [profileDraft, setProfileDraft] = useState<ProfileFormState>(emptyProfile);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -129,7 +174,7 @@ export function SettingsPage({
         return [...next, saved].sort((left, right) => left.name.localeCompare(right.name));
       });
       setProfileDraft({
-        ...emptyProfile,
+        ...emptyProfile(),
         environmentId: saved.environmentId,
       });
       setValidation({
@@ -320,10 +365,10 @@ export function SettingsPage({
                   className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
                   value={profileDraft.profileType}
                   onChange={(event) =>
-                    setProfileDraft((current) => ({
-                      ...current,
-                      profileType: event.target.value as ConnectionProfileType,
-                    }))
+                    setProfileDraft(buildNextProfileTypeState(
+                      profileDraft,
+                      event.target.value as ConnectionProfileType,
+                    ))
                   }
                 >
                   {profileTypeOptions.map((option) => (
@@ -344,59 +389,24 @@ export function SettingsPage({
               </Field>
               <Field label="Endpoint or host">
                 <Input
-                  placeholder="https://k8s.example.com or 10.0.0.8:22"
+                  placeholder={endpointPlaceholder(profileDraft.profileType)}
                   value={profileDraft.endpoint}
                   onChange={(event) =>
                     setProfileDraft((current) => ({ ...current, endpoint: event.target.value }))
                   }
                 />
               </Field>
-              <Field label="Username">
-                <Input
-                  placeholder="ops-user"
-                  value={profileDraft.username}
-                  onChange={(event) =>
-                    setProfileDraft((current) => ({ ...current, username: event.target.value }))
-                  }
-                />
-              </Field>
-              <Field label="Default scope">
-                <Input
-                  placeholder="namespace, index pattern, or config group"
-                  value={profileDraft.defaultScope}
-                  onChange={(event) =>
-                    setProfileDraft((current) => ({ ...current, defaultScope: event.target.value }))
-                  }
-                />
-              </Field>
+              {renderTypeSpecificFields(profileDraft, setProfileDraft)}
             </div>
-            <Field label="Extra JSON">
-              <Textarea
-                className="min-h-28"
-                value={profileDraft.configJson}
-                onChange={(event) =>
-                  setProfileDraft((current) => ({ ...current, configJson: event.target.value }))
-                }
-              />
-              {profileDraft.profileType === "ssh" ? (
-                <p className="text-xs leading-5 text-muted-foreground">
-                  SSH supports <code>{"{\"authMode\":\"agent\"}"}</code> or{" "}
-                  <code>{"{\"authMode\":\"key\",\"privateKeyPath\":\"~/.ssh/id_ed25519\",\"port\":22}"}</code>.
-                  Password auth is not wired yet in execution mode.
-                </p>
-              ) : null}
-              {profileDraft.profileType === "kubernetes" ? (
-                <p className="text-xs leading-5 text-muted-foreground">
-                  Kubernetes local execution supports{" "}
-                  <code>{"{\"kubeconfigPath\":\"/Users/you/.kube/config\",\"context\":\"prod-cluster\"}"}</code>.
-                </p>
-              ) : null}
-              {profileDraft.profileType === "nacos" ? (
-                <p className="text-xs leading-5 text-muted-foreground">
-                  Nacos supports <code>{"{\"apiVersion\":\"v1\",\"authMode\":\"basic\",\"namespaceId\":\"public\"}"}</code> or{" "}
-                  <code>{"{\"apiVersion\":\"v2\",\"authMode\":\"accessToken\",\"namespaceId\":\"public\"}"}</code>.
-                </p>
-              ) : null}
+            <Field label="Connection summary">
+              <div className="rounded-lg border bg-muted/20 p-4 text-xs leading-6 text-muted-foreground">
+                <pre className="whitespace-pre-wrap break-all">
+                  {JSON.stringify(composeStructuredConfig(profileDraft), null, 2)}
+                </pre>
+              </div>
+              <p className="text-xs leading-5 text-muted-foreground">
+                The app still stores structured config internally, but you no longer need to type raw JSON by hand.
+              </p>
             </Field>
             <Field label="Notes">
               <Textarea
@@ -416,6 +426,9 @@ export function SettingsPage({
                   setProfileDraft((current) => ({ ...current, secretValue: event.target.value }))
                 }
               />
+              <p className="text-xs leading-5 text-muted-foreground">
+                Use this for passwords, tokens, or API keys. It is stored in the system keychain, not in SQLite.
+              </p>
             </Field>
             <div className="flex flex-wrap gap-3">
               <Button onClick={() => void handleValidateProfile()} variant="outline" disabled={isSaving}>
@@ -470,6 +483,9 @@ export function SettingsPage({
                           <p className="mt-3 text-sm text-muted-foreground">
                             Scope: {profile.defaultScope || "n/a"} · User: {profile.username || "n/a"}
                           </p>
+                          <p className="mt-2 break-all text-xs text-muted-foreground">
+                            Config: {profile.configJson}
+                          </p>
                           <div className="mt-3">
                             <Button
                               onClick={() => void handleClearSecret(profile.id)}
@@ -520,15 +536,410 @@ function ToggleField({
   );
 }
 
-function normalizeProfileDraft(draft: UpsertConnectionProfileInput): UpsertConnectionProfileInput {
+function normalizeProfileDraft(draft: ProfileFormState): UpsertConnectionProfileInput {
+  const normalizedEndpoint =
+    draft.profileType === "ssh"
+      ? draft.sshHost.trim() || draft.endpoint.trim()
+      : draft.endpoint.trim();
+
   return {
-    ...draft,
+    id: draft.id,
+    environmentId: draft.environmentId,
+    profileType: draft.profileType,
+    name: draft.name.trim(),
+    endpoint: normalizedEndpoint,
     username: draft.username?.trim() || undefined,
     defaultScope: draft.defaultScope?.trim() || undefined,
     notes: draft.notes?.trim() || undefined,
-    configJson: draft.configJson?.trim() || "{}",
+    configJson: JSON.stringify(composeStructuredConfig(draft)),
     secretValue: draft.secretValue?.trim() || undefined,
   };
+}
+
+function composeStructuredConfig(draft: ProfileFormState): Record<string, unknown> {
+  switch (draft.profileType) {
+    case "kubernetes":
+      return {
+        kubeconfigPath: draft.kubeconfigPath.trim() || undefined,
+        context: draft.kubeContext.trim() || undefined,
+      };
+    case "ssh":
+      return {
+        host: draft.sshHost.trim() || undefined,
+        port: toNumberOrUndefined(draft.sshPort),
+        authMode: draft.sshAuthMode,
+        privateKeyPath: draft.sshPrivateKeyPath.trim() || undefined,
+      };
+    case "elk":
+      return {
+        indexPattern: draft.elkIndexPattern.trim() || undefined,
+        space: draft.elkSpace.trim() || undefined,
+      };
+    case "nacos":
+      return {
+        namespaceId: draft.nacosNamespaceId.trim() || undefined,
+        group: draft.nacosGroup.trim() || undefined,
+        apiVersion: draft.nacosApiVersion,
+        authMode: draft.nacosAuthMode,
+      };
+    case "redis":
+      return {
+        database: toNumberOrUndefined(draft.redisDatabase),
+        tlsEnabled: draft.redisTlsEnabled,
+        slowlogLimit: toNumberOrUndefined(draft.redisSlowlogLimit),
+      };
+    case "qwen":
+      return {
+        basePath: draft.qwenBasePath.trim() || "/compatible-mode/v1",
+      };
+    default:
+      return {};
+  }
+}
+
+function endpointPlaceholder(profileType: ConnectionProfileType): string {
+  switch (profileType) {
+    case "kubernetes":
+      return "https://k8s.example.com";
+    case "elk":
+      return "https://elk.example.com";
+    case "ssh":
+      return "10.0.0.8";
+    case "nacos":
+      return "https://nacos.example.com";
+    case "redis":
+      return "redis.example.com:6379";
+    case "qwen":
+      return "https://dashscope.aliyuncs.com";
+    default:
+      return "Endpoint";
+  }
+}
+
+function buildNextProfileTypeState(
+  current: ProfileFormState,
+  nextType: ConnectionProfileType,
+): ProfileFormState {
+  const base = {
+    ...current,
+    profileType: nextType,
+    secretValue: "",
+  };
+
+  switch (nextType) {
+    case "kubernetes":
+      return {
+        ...base,
+        defaultScope: current.defaultScope || "default",
+        username: "",
+      };
+    case "elk":
+      return {
+        ...base,
+        defaultScope: current.defaultScope || "logs-*",
+      };
+    case "ssh":
+      return {
+        ...base,
+        username: current.username || "root",
+      };
+    case "nacos":
+      return {
+        ...base,
+        defaultScope: current.defaultScope || "DEFAULT_GROUP",
+      };
+    case "redis":
+      return {
+        ...base,
+        defaultScope: current.defaultScope || "0",
+      };
+    case "qwen":
+      return {
+        ...base,
+        defaultScope: current.defaultScope || "qwen-plus",
+      };
+    default:
+      return base;
+  }
+}
+
+function renderTypeSpecificFields(
+  profileDraft: ProfileFormState,
+  setProfileDraft: React.Dispatch<React.SetStateAction<ProfileFormState>>,
+) {
+  switch (profileDraft.profileType) {
+    case "kubernetes":
+      return (
+        <>
+          <Field label="Kubeconfig path">
+            <Input
+              placeholder="/Users/you/.kube/config"
+              value={profileDraft.kubeconfigPath}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, kubeconfigPath: event.target.value }))
+              }
+            />
+          </Field>
+          <Field label="Context">
+            <Input
+              placeholder="prod-cluster"
+              value={profileDraft.kubeContext}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, kubeContext: event.target.value }))
+              }
+            />
+          </Field>
+          <Field label="Default namespace">
+            <Input
+              placeholder="default"
+              value={profileDraft.defaultScope}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, defaultScope: event.target.value }))
+              }
+            />
+          </Field>
+        </>
+      );
+    case "elk":
+      return (
+        <>
+          <Field label="Username">
+            <Input
+              placeholder="elastic"
+              value={profileDraft.username}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, username: event.target.value }))
+              }
+            />
+          </Field>
+          <Field label="Index pattern">
+            <Input
+              placeholder="logs-*"
+              value={profileDraft.elkIndexPattern}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, elkIndexPattern: event.target.value }))
+              }
+            />
+          </Field>
+          <Field label="Space or tenant">
+            <Input
+              placeholder="observability"
+              value={profileDraft.elkSpace}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, elkSpace: event.target.value }))
+              }
+            />
+          </Field>
+        </>
+      );
+    case "ssh":
+      return (
+        <>
+          <Field label="Username">
+            <Input
+              placeholder="ops-user"
+              value={profileDraft.username}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, username: event.target.value }))
+              }
+            />
+          </Field>
+          <Field label="Host">
+            <Input
+              placeholder="app-prod-01.internal"
+              value={profileDraft.sshHost}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, sshHost: event.target.value }))
+              }
+            />
+          </Field>
+          <Field label="Port">
+            <Input
+              placeholder="22"
+              value={profileDraft.sshPort}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, sshPort: event.target.value }))
+              }
+            />
+          </Field>
+          <Field label="Auth mode">
+            <select
+              className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
+              value={profileDraft.sshAuthMode}
+              onChange={(event) =>
+                setProfileDraft((current) => ({
+                  ...current,
+                  sshAuthMode: event.target.value as ProfileFormState["sshAuthMode"],
+                }))
+              }
+            >
+              <option value="password">password</option>
+              <option value="key">private key</option>
+              <option value="agent">ssh agent</option>
+            </select>
+          </Field>
+          {profileDraft.sshAuthMode === "key" ? (
+            <Field label="Private key path">
+              <Input
+                placeholder="~/.ssh/id_ed25519"
+                value={profileDraft.sshPrivateKeyPath}
+                onChange={(event) =>
+                  setProfileDraft((current) => ({ ...current, sshPrivateKeyPath: event.target.value }))
+                }
+              />
+            </Field>
+          ) : null}
+        </>
+      );
+    case "nacos":
+      return (
+        <>
+          <Field label="Username">
+            <Input
+              placeholder="nacos"
+              value={profileDraft.username}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, username: event.target.value }))
+              }
+            />
+          </Field>
+          <Field label="Namespace ID">
+            <Input
+              placeholder="public"
+              value={profileDraft.nacosNamespaceId}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, nacosNamespaceId: event.target.value }))
+              }
+            />
+          </Field>
+          <Field label="Default group">
+            <Input
+              placeholder="DEFAULT_GROUP"
+              value={profileDraft.nacosGroup}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, nacosGroup: event.target.value }))
+              }
+            />
+          </Field>
+          <Field label="API version">
+            <select
+              className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
+              value={profileDraft.nacosApiVersion}
+              onChange={(event) =>
+                setProfileDraft((current) => ({
+                  ...current,
+                  nacosApiVersion: event.target.value as ProfileFormState["nacosApiVersion"],
+                }))
+              }
+            >
+              <option value="v1">v1</option>
+              <option value="v2">v2</option>
+            </select>
+          </Field>
+          <Field label="Auth mode">
+            <select
+              className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
+              value={profileDraft.nacosAuthMode}
+              onChange={(event) =>
+                setProfileDraft((current) => ({
+                  ...current,
+                  nacosAuthMode: event.target.value as ProfileFormState["nacosAuthMode"],
+                }))
+              }
+            >
+              <option value="basic">basic</option>
+              <option value="accessToken">access token</option>
+            </select>
+          </Field>
+        </>
+      );
+    case "redis":
+      return (
+        <>
+          <Field label="Username">
+            <Input
+              placeholder="default"
+              value={profileDraft.username}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, username: event.target.value }))
+              }
+            />
+          </Field>
+          <Field label="Database">
+            <Input
+              placeholder="0"
+              value={profileDraft.redisDatabase}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, redisDatabase: event.target.value }))
+              }
+            />
+          </Field>
+          <Field label="Slowlog sample limit">
+            <Input
+              placeholder="5"
+              value={profileDraft.redisSlowlogLimit}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, redisSlowlogLimit: event.target.value }))
+              }
+            />
+          </Field>
+          <Field label="Default key prefix">
+            <Input
+              placeholder="payment:*"
+              value={profileDraft.defaultScope}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, defaultScope: event.target.value }))
+              }
+            />
+          </Field>
+          <ToggleField
+            checked={profileDraft.redisTlsEnabled}
+            label="TLS enabled"
+            onChange={(checked) =>
+              setProfileDraft((current) => ({ ...current, redisTlsEnabled: checked }))
+            }
+          />
+        </>
+      );
+    case "qwen":
+      return (
+        <>
+          <Field label="Model">
+            <Input
+              placeholder="qwen-plus"
+              value={profileDraft.qwenModel}
+              onChange={(event) =>
+                setProfileDraft((current) => ({
+                  ...current,
+                  qwenModel: event.target.value,
+                  defaultScope: event.target.value,
+                }))
+              }
+            />
+          </Field>
+          <Field label="Base path">
+            <Input
+              placeholder="/compatible-mode/v1"
+              value={profileDraft.qwenBasePath}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, qwenBasePath: event.target.value }))
+              }
+            />
+          </Field>
+        </>
+      );
+    default:
+      return null;
+  }
+}
+
+function toNumberOrUndefined(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function updateEnvironmentDraft(
