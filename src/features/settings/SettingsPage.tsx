@@ -16,6 +16,7 @@ import { Label } from "../../components/ui/label";
 import { Textarea } from "../../components/ui/textarea";
 import {
   clearConnectionProfileSecret,
+  deleteConnectionProfile,
   listConnectionProfiles,
   saveConnectionProfile,
   saveEnvironment,
@@ -105,6 +106,7 @@ export function SettingsPage({
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
 
   useEffect(() => {
     setEnvironmentDrafts(environments.map((environment) => ({ ...environment })));
@@ -177,6 +179,7 @@ export function SettingsPage({
         ...emptyProfile(),
         environmentId: saved.environmentId,
       });
+      setActiveProfileId(null);
       setValidation({
         ok: true,
         messages: [`Saved connection profile ${saved.name}.`],
@@ -204,6 +207,35 @@ export function SettingsPage({
     } finally {
       setIsSaving(false);
     }
+  }
+
+  async function handleDeleteProfile(profileId: string) {
+    setIsSaving(true);
+    setStatusMessage(null);
+    try {
+      await deleteConnectionProfile(profileId);
+      setConnectionProfiles((current) => current.filter((profile) => profile.id !== profileId));
+      if (activeProfileId === profileId) {
+        setProfileDraft({
+          ...emptyProfile(),
+          environmentId: environments[0]?.id ?? "dev",
+        });
+        setActiveProfileId(null);
+        setValidation(null);
+      }
+      setStatusMessage("Connection profile deleted.");
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Failed to delete profile.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function handleEditProfile(profile: ConnectionProfile) {
+    setProfileDraft(profileToDraft(profile));
+    setActiveProfileId(profile.id);
+    setValidation(null);
+    setStatusMessage(`Editing ${profile.name}.`);
   }
 
   return (
@@ -344,6 +376,35 @@ export function SettingsPage({
           description="Store profile metadata in SQLite and keep secrets in the system keychain. Validation here is local-first and safe."
         >
           <div className="space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/20 p-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  {activeProfileId ? "Editing existing profile" : "Create a new profile"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {activeProfileId
+                    ? "Save will update the selected profile."
+                    : "Fill in the fields below to add a new integration profile."}
+                </p>
+              </div>
+              {activeProfileId ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setProfileDraft({
+                      ...emptyProfile(),
+                      environmentId: environments[0]?.id ?? "dev",
+                    });
+                    setActiveProfileId(null);
+                    setValidation(null);
+                    setStatusMessage("Switched back to new profile mode.");
+                  }}
+                >
+                  Cancel Edit
+                </Button>
+              ) : null}
+            </div>
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="Environment">
                 <select
@@ -487,14 +548,33 @@ export function SettingsPage({
                             Config: {profile.configJson}
                           </p>
                           <div className="mt-3">
-                            <Button
-                              onClick={() => void handleClearSecret(profile.id)}
-                              size="sm"
-                              variant="ghost"
-                              disabled={!profile.hasSecret || isSaving}
-                            >
-                              Clear Secret
-                            </Button>
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                onClick={() => handleEditProfile(profile)}
+                                size="sm"
+                                variant="outline"
+                                disabled={isSaving}
+                              >
+                                Edit
+                              </Button>
+                              <Button
+                                onClick={() => void handleClearSecret(profile.id)}
+                                size="sm"
+                                variant="ghost"
+                                disabled={!profile.hasSecret || isSaving}
+                              >
+                                Clear Secret
+                              </Button>
+                              <Button
+                                onClick={() => void handleDeleteProfile(profile.id)}
+                                size="sm"
+                                variant="ghost"
+                                disabled={isSaving}
+                                className="text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+                              >
+                                Delete
+                              </Button>
+                            </div>
                           </div>
                         </div>
                       ))
@@ -940,6 +1020,75 @@ function toNumberOrUndefined(value: string): number | undefined {
   }
   const parsed = Number(trimmed);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function profileToDraft(profile: ConnectionProfile): ProfileFormState {
+  const rawConfig = tryParseConfig(profile.configJson);
+
+  return {
+    ...emptyProfile(),
+    id: profile.id,
+    environmentId: profile.environmentId,
+    profileType: profile.profileType as ConnectionProfileType,
+    name: profile.name,
+    endpoint: profile.endpoint,
+    username: profile.username ?? "",
+    defaultScope: profile.defaultScope ?? "",
+    notes: profile.notes ?? "",
+    secretValue: "",
+    kubeconfigPath: stringValue(rawConfig.kubeconfigPath),
+    kubeContext: stringValue(rawConfig.context),
+    sshHost: stringValue(rawConfig.host) || profile.endpoint,
+    sshPort: stringValue(rawConfig.port) || "22",
+    sshAuthMode: sshAuthModeValue(rawConfig.authMode),
+    sshPrivateKeyPath: stringValue(rawConfig.privateKeyPath),
+    elkIndexPattern: stringValue(rawConfig.indexPattern),
+    elkSpace: stringValue(rawConfig.space),
+    nacosNamespaceId: stringValue(rawConfig.namespaceId),
+    nacosGroup: stringValue(rawConfig.group) || "DEFAULT_GROUP",
+    nacosApiVersion: nacosApiVersionValue(rawConfig.apiVersion),
+    nacosAuthMode: nacosAuthModeValue(rawConfig.authMode),
+    redisDatabase: stringValue(rawConfig.database) || "0",
+    redisTlsEnabled: booleanValue(rawConfig.tlsEnabled),
+    redisSlowlogLimit: stringValue(rawConfig.slowlogLimit) || "5",
+    qwenModel: profile.defaultScope || "qwen-plus",
+    qwenBasePath: stringValue(rawConfig.basePath) || "/compatible-mode/v1",
+  };
+}
+
+function tryParseConfig(configJson: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(configJson) as Record<string, unknown>;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function stringValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  return "";
+}
+
+function booleanValue(value: unknown): boolean {
+  return value === true;
+}
+
+function sshAuthModeValue(value: unknown): ProfileFormState["sshAuthMode"] {
+  return value === "key" || value === "agent" ? value : "password";
+}
+
+function nacosApiVersionValue(value: unknown): ProfileFormState["nacosApiVersion"] {
+  return value === "v2" ? "v2" : "v1";
+}
+
+function nacosAuthModeValue(value: unknown): ProfileFormState["nacosAuthMode"] {
+  return value === "accessToken" ? "accessToken" : "basic";
 }
 
 function updateEnvironmentDraft(

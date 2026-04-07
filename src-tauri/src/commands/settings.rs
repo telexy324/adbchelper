@@ -89,3 +89,13 @@ pub fn clear_connection_profile_secret(
     db::update_connection_profile_secret_state(&connection, &profile_id, false)
         .map_err(|error| error.to_string())
 }
+
+#[tauri::command]
+pub fn delete_connection_profile(
+    state: State<'_, AppState>,
+    profile_id: String,
+) -> Result<(), String> {
+    let connection = open_connection(&state.storage_path)?;
+    secrets::delete_profile_secret(&profile_id).map_err(|error| error.to_string())?;
+    db::delete_connection_profile(&connection, &profile_id).map_err(|error| error.to_string())
+}

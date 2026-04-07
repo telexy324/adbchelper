@@ -435,6 +435,18 @@ pub fn update_connection_profile_secret_state(
     Ok(())
 }
 
+pub fn delete_connection_profile(
+    connection: &Connection,
+    profile_id: &str,
+) -> Result<(), rusqlite::Error> {
+    connection.execute(
+        "DELETE FROM connection_profiles WHERE id = ?1",
+        params![profile_id],
+    )?;
+
+    Ok(())
+}
+
 pub fn validate_connection_profile(input: &UpsertConnectionProfileInput) -> ValidationResult {
     let mut messages = Vec::new();
 

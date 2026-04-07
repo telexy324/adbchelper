@@ -87,6 +87,10 @@ export async function clearConnectionProfileSecret(profileId: string): Promise<v
   return invoke("clear_connection_profile_secret", { profileId });
 }
 
+export async function deleteConnectionProfile(profileId: string): Promise<void> {
+  return invoke("delete_connection_profile", { profileId });
+}
+
 export async function listChatSessions(): Promise<ChatSession[]> {
   return invoke<ChatSession[]>("list_chat_sessions");
 }

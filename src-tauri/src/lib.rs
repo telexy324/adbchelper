@@ -69,7 +69,8 @@ pub fn run() {
             commands::settings::list_connection_profiles,
             commands::settings::validate_connection_profile,
             commands::settings::save_connection_profile,
-            commands::settings::clear_connection_profile_secret
+            commands::settings::clear_connection_profile_secret,
+            commands::settings::delete_connection_profile
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
