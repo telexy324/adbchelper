@@ -7,4 +7,5 @@ pub struct AppHealth {
     pub version: String,
     pub database_ready: bool,
     pub storage_path: String,
+    pub log_path: String,
 }

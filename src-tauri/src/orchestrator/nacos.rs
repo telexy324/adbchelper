@@ -129,7 +129,7 @@ async fn apply_auth(
     config: &NacosProfileConfig,
 ) -> Result<reqwest::RequestBuilder, String> {
     let secret = if profile.has_secret {
-        Some(secrets::get_profile_secret(&profile.id).map_err(|error| error.to_string())?)
+        Some(secrets::get_profile_secret(None, &profile.id).map_err(|error| error.to_string())?)
     } else {
         None
     };

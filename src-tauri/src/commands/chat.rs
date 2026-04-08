@@ -38,7 +38,7 @@ pub async fn send_chat_message(
     state: State<'_, AppState>,
     input: SendChatMessageInput,
 ) -> Result<ChatResponse, String> {
-    chat::send_message(&state.storage_path, input).await
+    chat::send_message(&state.storage_path, &state.app_data_dir, input).await
 }
 
 #[tauri::command]

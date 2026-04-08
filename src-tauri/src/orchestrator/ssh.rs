@@ -33,7 +33,7 @@ pub fn run_diagnostics(
     let profile = resolve_ssh_profile(connection, &input.environment_id)?;
     let ssh_config = SshConfig::from_profile(&profile, input.host.as_deref())?;
     let secret = if profile.has_secret {
-        Some(secrets::get_profile_secret(&profile.id).map_err(|error| error.to_string())?)
+        Some(secrets::get_profile_secret(None, &profile.id).map_err(|error| error.to_string())?)
     } else {
         None
     };

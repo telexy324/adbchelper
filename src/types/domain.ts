@@ -428,6 +428,7 @@ export interface AppHealth {
   version: string;
   databaseReady: boolean;
   storagePath: string;
+  logPath: string;
 }
 
 export interface NavigationItem {

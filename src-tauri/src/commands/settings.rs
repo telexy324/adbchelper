@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use rusqlite::Connection;
 use tauri::State;
 use uuid::Uuid;
@@ -66,7 +68,16 @@ pub fn save_connection_profile(
 
     if let Some(secret_value) = &input.secret_value {
         if !secret_value.trim().is_empty() {
-            secrets::set_profile_secret(&profile_id, secret_value).map_err(|error| error.to_string())?;
+            match secrets::set_profile_secret(Some(Path::new(&state.app_data_dir)), &profile_id, secret_value) {
+                Ok(()) => {}
+                Err(error) => {
+                    if error.to_string().contains("stored secret in app data fallback instead") {
+                        // Keep the save successful when fallback storage works.
+                    } else {
+                        return Err(error.to_string());
+                    }
+                }
+            }
             db::update_connection_profile_secret_state(&connection, &profile_id, true)
                 .map_err(|error| error.to_string())?;
         }
@@ -85,7 +96,8 @@ pub fn clear_connection_profile_secret(
     profile_id: String,
 ) -> Result<(), String> {
     let connection = open_connection(&state.storage_path)?;
-    secrets::delete_profile_secret(&profile_id).map_err(|error| error.to_string())?;
+    secrets::delete_profile_secret(Some(Path::new(&state.app_data_dir)), &profile_id)
+        .map_err(|error| error.to_string())?;
     db::update_connection_profile_secret_state(&connection, &profile_id, false)
         .map_err(|error| error.to_string())
 }
@@ -96,6 +108,7 @@ pub fn delete_connection_profile(
     profile_id: String,
 ) -> Result<(), String> {
     let connection = open_connection(&state.storage_path)?;
-    secrets::delete_profile_secret(&profile_id).map_err(|error| error.to_string())?;
+    secrets::delete_profile_secret(Some(Path::new(&state.app_data_dir)), &profile_id)
+        .map_err(|error| error.to_string())?;
     db::delete_connection_profile(&connection, &profile_id).map_err(|error| error.to_string())
 }

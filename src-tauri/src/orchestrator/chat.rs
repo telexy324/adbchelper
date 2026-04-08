@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use chrono::Utc;
 use rusqlite::Connection;
 use serde_json::Value;
@@ -5,7 +7,7 @@ use serde_json::Value;
 use crate::llm::qwen::{complete_chat, QwenConfig, QwenMessage};
 use crate::models::chat::{ChatMessage, ChatResponse, ChatSession, SendChatMessageInput, ToolDefinition};
 use crate::models::connection_profile::ConnectionProfile;
-use crate::storage::{db, secrets};
+use crate::storage::{app_log, db, secrets};
 
 pub fn tool_catalog() -> Vec<ToolDefinition> {
     vec![
@@ -49,6 +51,7 @@ pub fn tool_catalog() -> Vec<ToolDefinition> {
 
 pub async fn send_message(
     storage_path: &str,
+    app_data_dir: &str,
     input: SendChatMessageInput,
 ) -> Result<ChatResponse, String> {
     let connection = Connection::open(storage_path).map_err(|error| error.to_string())?;
@@ -61,14 +64,45 @@ pub async fn send_message(
 
     let recent_messages = db::list_chat_messages(&connection, &session.id).map_err(|error| error.to_string())?;
     let qwen_profile = select_qwen_profile(&connection, &input.environment_id)?;
-    let api_key = secrets::get_profile_secret(&qwen_profile.id).map_err(|error| error.to_string())?;
+    if !secrets::has_profile_secret(Some(Path::new(app_data_dir)), &qwen_profile.id) {
+        let message = format!(
+            "Qwen secret missing for profile '{}' ({}). Re-enter app_secret in Settings on this machine. Keychain entries do not move with the SQLite database.",
+            qwen_profile.name, qwen_profile.id
+        );
+        let _ = app_log::append_log(Path::new(app_data_dir), "ERROR", "qwen_secret", &message);
+        return Err(message);
+    }
+    let app_secret = secrets::get_profile_secret(Some(Path::new(app_data_dir)), &qwen_profile.id).map_err(|error| {
+        let message = format!("Failed to load Qwen secret for profile '{}': {}", qwen_profile.name, error);
+        let _ = app_log::append_log(Path::new(app_data_dir), "ERROR", "qwen_secret", &message);
+        message
+    })?;
     let qwen_config_json: Value =
         serde_json::from_str(&qwen_profile.config_json).unwrap_or_else(|_| Value::Object(Default::default()));
+    let app_key = qwen_config_json
+        .get("appKey")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            let message = format!(
+                "Qwen app_key missing for profile '{}'. Fill in App key in Settings.",
+                qwen_profile.name
+            );
+            let _ = app_log::append_log(Path::new(app_data_dir), "ERROR", "qwen_config", &message);
+            message
+        })?
+        .to_string();
     let content_type = qwen_config_json
         .get("contentType")
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("application/json")
+        .to_string();
+    let base_path = qwen_config_json
+        .get("basePath")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("/chat/completions")
         .to_string();
     let model = qwen_profile
         .default_scope
@@ -81,22 +115,43 @@ pub async fn send_message(
 
     db::insert_audit_log(&connection, Some(&session.id), Some(&input.environment_id), "assistant", "qwen_request", Some("qwen"), None, Some(&format!("model={model}, messages={}", qwen_messages.len())), "started")
         .map_err(|error| error.to_string())?;
+    let _ = app_log::append_log(
+        Path::new(app_data_dir),
+        "INFO",
+        "qwen_request",
+        &format!(
+            "session={} environment={} profile={} model={} endpoint={}",
+            session.id, input.environment_id, qwen_profile.name, model, qwen_profile.endpoint
+        ),
+    );
     drop(connection);
 
     let completion = complete_chat(
         &QwenConfig {
             base_url: qwen_profile.endpoint.clone(),
-            api_key,
+            base_path,
+            app_key,
+            app_secret,
             model: model.clone(),
             content_type,
         },
         qwen_messages,
     )
     .await
-    .map_err(|error| error.to_string())?;
+    .map_err(|error| {
+        let message = format!("Qwen request failed for profile '{}': {}", qwen_profile.name, error);
+        let _ = app_log::append_log(Path::new(app_data_dir), "ERROR", "qwen_request", &message);
+        message
+    })?;
+    let _ = app_log::append_log(
+        Path::new(app_data_dir),
+        "INFO",
+        "qwen_response_raw",
+        &completion.raw_body,
+    );
 
     let connection = Connection::open(storage_path).map_err(|error| error.to_string())?;
-    let assistant_message = db::append_chat_message(&connection, &session.id, "assistant", &completion, None, None)
+    let assistant_message = db::append_chat_message(&connection, &session.id, "assistant", &completion.content, None, None)
         .map_err(|error| error.to_string())?;
 
     db::touch_chat_session(&connection, &session.id).map_err(|error| error.to_string())?;
@@ -112,6 +167,12 @@ pub async fn send_message(
         "completed",
     )
     .map_err(|error| error.to_string())?;
+    let _ = app_log::append_log(
+        Path::new(app_data_dir),
+        "INFO",
+        "qwen_response",
+        &format!("session={} environment={} response_saved=true", session.id, input.environment_id),
+    );
 
     let session = db::get_chat_session(&connection, &session.id)
         .map_err(|error| error.to_string())?

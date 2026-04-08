@@ -12,7 +12,7 @@ import { ChatPage } from "./features/chat/ChatPage";
 import { InvestigationsPage } from "./features/investigations/InvestigationsPage";
 import { ResourcesPage } from "./features/resources/ResourcesPage";
 import { SettingsPage } from "./features/settings/SettingsPage";
-import { getAppHealth, listEnvironments } from "./lib/tauri";
+import { getAppHealth, listEnvironments, toggleDevtools } from "./lib/tauri";
 import { Badge } from "./components/ui/badge";
 import type {
   AppHealth,
@@ -74,6 +74,30 @@ export function App() {
 
   useEffect(() => {
     void bootstrap();
+  }, []);
+
+  useEffect(() => {
+    function handleDebugShortcut(event: KeyboardEvent) {
+      const isToggleCombo =
+        (event.ctrlKey || event.metaKey) &&
+        event.shiftKey &&
+        event.key.toLowerCase() === "i";
+      const isF12 = event.key === "F12";
+
+      if (!isToggleCombo && !isF12) {
+        return;
+      }
+
+      event.preventDefault();
+      void toggleDevtools().catch((error) => {
+        console.error("Failed to toggle desktop devtools", error);
+      });
+    }
+
+    window.addEventListener("keydown", handleDebugShortcut);
+    return () => {
+      window.removeEventListener("keydown", handleDebugShortcut);
+    };
   }, []);
 
   const activeItem = navigationItems.find((item) => item.id === activeSection) ?? navigationItems[0];
@@ -173,6 +197,9 @@ export function App() {
                         {label}
                       </Badge>
                     ))}
+                    <Badge variant="outline" className="border-foreground/15 bg-white/80">
+                      Debug: Ctrl+Shift+I / F12
+                    </Badge>
                   </div>
                 </div>
               </div>

@@ -41,6 +41,10 @@ export async function getAppHealth(): Promise<AppHealth> {
   return invoke<AppHealth>("get_app_health");
 }
 
+export async function toggleDevtools(): Promise<void> {
+  return invoke("toggle_devtools");
+}
+
 export async function listApprovalRequests(): Promise<ApprovalRequest[]> {
   return invoke<ApprovalRequest[]>("list_approval_requests");
 }

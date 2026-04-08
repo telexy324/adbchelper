@@ -269,6 +269,10 @@ export function SettingsPage({
               <dt className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">Storage Path</dt>
               <dd className="mt-2 break-all text-sm text-foreground">{appHealth.storagePath}</dd>
             </div>
+            <div className="rounded-lg border bg-muted/30 p-4 md:col-span-2">
+              <dt className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">App Log</dt>
+              <dd className="mt-2 break-all text-sm text-foreground">{appHealth.logPath}</dd>
+            </div>
           </dl>
         ) : (
           <p className="text-sm text-muted-foreground">Loading runtime details...</p>
