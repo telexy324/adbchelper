@@ -28,6 +28,7 @@
     "active": true,
     "targets": "all",
     "category": "DeveloperTool",
-    "icon": []
+    "icon": [],
+    "resources": ["../tools/*"]
   }
 }

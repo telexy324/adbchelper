@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 
 use rusqlite::Connection;
@@ -12,21 +11,24 @@ use crate::models::kubernetes::{
     KubernetesEvent, KubernetesEventsSummary, ListKubernetesEventsInput, ListKubernetesEventsResponse,
 };
 use crate::hardening::{run_command_with_timeout, sanitize_and_mask_text};
+use crate::orchestrator::kubectl::{resolve_kubectl, KubectlLocator};
 use crate::storage::db;
 
 pub fn list_events(
     connection: &Connection,
     input: ListKubernetesEventsInput,
+    resource_dir: Option<&Path>,
+    executable_dir: Option<&Path>,
 ) -> Result<ListKubernetesEventsResponse, String> {
     let profile = resolve_kubernetes_profile(connection, &input.environment_id)?;
     let config = KubernetesProfileConfig::from_profile(&profile)?;
-    let events = fetch_events(&config, &input)?;
+    let (events, kubectl_source) = fetch_events(&config, &input, resource_dir, executable_dir)?;
     let summary = summarize_events(&input, &events);
 
     Ok(ListKubernetesEventsResponse {
         environment_id: input.environment_id,
         namespace: input.namespace.clone(),
-        adapter_mode: format!("kubectl-profile ({})", profile.name),
+        adapter_mode: format!("kubectl-profile ({}, {})", profile.name, kubectl_source),
         query_summary: format!(
             "namespace={}, involvedObject={}, reason={}",
             input.namespace,
@@ -49,8 +51,18 @@ fn resolve_kubernetes_profile(connection: &Connection, environment_id: &str) -> 
 fn fetch_events(
     config: &KubernetesProfileConfig,
     input: &ListKubernetesEventsInput,
-) -> Result<Vec<KubernetesEvent>, String> {
-    let mut command = Command::new("kubectl");
+    resource_dir: Option<&Path>,
+    executable_dir: Option<&Path>,
+) -> Result<(Vec<KubernetesEvent>, String), String> {
+    let kubectl = resolve_kubectl(
+        KubectlLocator {
+            resource_dir,
+            executable_dir,
+        },
+        config.kubectl_path.as_deref(),
+    )?;
+    let kubectl_source = kubectl.source_label.clone();
+    let mut command = kubectl.command();
     if let Some(kubeconfig_path) = &config.kubeconfig_path {
         if !Path::new(kubeconfig_path).exists() {
             return Err(format!("Configured kubeconfigPath does not exist: {kubeconfig_path}"));
@@ -70,14 +82,15 @@ fn fetch_events(
         .arg("-o")
         .arg("json");
 
-    let output = run_command_with_timeout(&mut command, Duration::from_secs(8), "kubectl get events")?;
+    let label = format!("kubectl get events using {}", kubectl.display_path());
+    let output = run_command_with_timeout(&mut command, Duration::from_secs(8), &label)?;
 
     if !output.status.success() {
         let stderr = sanitize_and_mask_text(String::from_utf8_lossy(&output.stderr).trim());
         return Err(if stderr.is_empty() {
-            format!("kubectl get events failed with status {}.", output.status)
+            format!("{label} failed with status {}.", output.status)
         } else {
-            format!("kubectl get events failed: {stderr}")
+            format!("{label} failed: {stderr}")
         });
     }
 
@@ -94,7 +107,7 @@ fn fetch_events(
         .map(|value| value.trim().to_ascii_lowercase())
         .filter(|value| !value.is_empty());
 
-    Ok(parsed
+    Ok((parsed
         .items
         .into_iter()
         .filter_map(|item| {
@@ -138,7 +151,7 @@ fn fetch_events(
                 event_time: timestamp,
             })
         })
-        .collect())
+        .collect(), kubectl_source))
 }
 
 fn summarize_events(input: &ListKubernetesEventsInput, events: &[KubernetesEvent]) -> KubernetesEventsSummary {
@@ -185,6 +198,7 @@ fn event_level(event_type: &Option<String>, reason: &str, message: &str) -> Stri
 struct KubernetesProfileConfig {
     kubeconfig_path: Option<String>,
     context: Option<String>,
+    kubectl_path: Option<String>,
 }
 
 impl KubernetesProfileConfig {
@@ -203,14 +217,21 @@ impl KubernetesProfileConfig {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string);
+        let kubectl_path = config
+            .get("kubectlPath")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
 
         if kubeconfig_path.is_none() && profile.endpoint.trim().is_empty() {
-            return Err("Kubernetes profile requires kubeconfigPath in Extra JSON for local kubectl execution.".to_string());
+            return Err("Kubernetes profiles should provide an API endpoint or a kubeconfig path for local kubectl execution.".to_string());
         }
 
         Ok(Self {
             kubeconfig_path,
             context,
+            kubectl_path,
         })
     }
 }

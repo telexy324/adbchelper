@@ -1,4 +1,5 @@
 use rusqlite::Connection;
+use std::path::Path;
 use tauri::State;
 
 use crate::models::kubernetes::{ListKubernetesEventsInput, ListKubernetesEventsResponse};
@@ -16,7 +17,12 @@ pub fn list_kubernetes_events(
     input: ListKubernetesEventsInput,
 ) -> Result<ListKubernetesEventsResponse, String> {
     let connection = open_connection(&state.storage_path)?;
-    let response = kubernetes::list_events(&connection, input)?;
+    let response = kubernetes::list_events(
+        &connection,
+        input,
+        Some(Path::new(&state.resource_dir)),
+        Some(Path::new(&state.executable_dir)),
+    )?;
 
     db::insert_audit_log(
         &connection,

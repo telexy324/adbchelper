@@ -8,6 +8,7 @@ use tauri::State;
 
 use crate::hardening::{run_command_with_timeout, sanitize_and_mask_text};
 use crate::models::approval::{ApprovalRequest, CreateApprovalInput, ExecuteApprovalInput};
+use crate::orchestrator::kubectl::{resolve_kubectl, KubectlLocator};
 use crate::storage::db;
 use crate::AppState;
 
@@ -116,7 +117,13 @@ pub fn execute_approval_request(
 
     let target_details = serde_json::from_str::<Value>(&target_details_json)
         .map_err(|error| format!("Invalid approval target details: {error}"))?;
-    let execution_summary = execute_action(&connection, &approval, &target_details)?;
+    let execution_summary = execute_action(
+        &connection,
+        &approval,
+        &target_details,
+        Some(Path::new(&state.resource_dir)),
+        Some(Path::new(&state.executable_dir)),
+    )?;
 
     db::update_approval_status(&connection, &approval.id, "executed", Some(&execution_summary))
         .map_err(|error| error.to_string())?;
@@ -164,10 +171,14 @@ fn execute_action(
     connection: &Connection,
     approval: &ApprovalRequest,
     target_details: &Value,
+    resource_dir: Option<&Path>,
+    executable_dir: Option<&Path>,
 ) -> Result<String, String> {
     match approval.action_type.as_str() {
-        "restart_pod" => execute_restart_pod(connection, approval, target_details),
-        "scale_deployment" => execute_scale_deployment(connection, approval, target_details),
+        "restart_pod" => execute_restart_pod(connection, approval, target_details, resource_dir, executable_dir),
+        "scale_deployment" => {
+            execute_scale_deployment(connection, approval, target_details, resource_dir, executable_dir)
+        }
         "reload_nginx" => execute_reload_nginx(connection, approval, target_details),
         other => Err(format!("Unsupported approval action: {other}")),
     }
@@ -177,24 +188,35 @@ fn execute_restart_pod(
     connection: &Connection,
     approval: &ApprovalRequest,
     target_details: &Value,
+    resource_dir: Option<&Path>,
+    executable_dir: Option<&Path>,
 ) -> Result<String, String> {
     let profile = resolve_profile(connection, &approval.environment_id, "kubernetes")?;
     let namespace = required_string(target_details, "namespace")?;
     let pod = required_string(target_details, "podName")?;
     let config = KubernetesExecConfig::from_profile(&profile)?;
 
-    let mut command = Command::new("kubectl");
+    let kubectl = resolve_kubectl(
+        KubectlLocator {
+            resource_dir,
+            executable_dir,
+        },
+        config.kubectl_path.as_deref(),
+    )?;
+    let mut command = kubectl.command();
     config.apply(&mut command)?;
     command.arg("delete").arg("pod").arg(&pod).arg("-n").arg(&namespace);
-    let output = run_command_with_timeout(&mut command, Duration::from_secs(10), "kubectl delete pod")?;
+    let label = format!("kubectl delete pod using {}", kubectl.display_path());
+    let output = run_command_with_timeout(&mut command, Duration::from_secs(10), &label)?;
     if !output.status.success() {
-        return Err(command_error("kubectl delete pod", &output));
+        return Err(command_error(&label, &output));
     }
 
     Ok(format!(
-        "Restarted pod {} in namespace {}. {}",
+        "Restarted pod {} in namespace {} via {}. {}",
         pod,
         namespace,
+        kubectl.source_label,
         sanitize_and_mask_text(String::from_utf8_lossy(&output.stdout).trim())
     ))
 }
@@ -203,6 +225,8 @@ fn execute_scale_deployment(
     connection: &Connection,
     approval: &ApprovalRequest,
     target_details: &Value,
+    resource_dir: Option<&Path>,
+    executable_dir: Option<&Path>,
 ) -> Result<String, String> {
     let profile = resolve_profile(connection, &approval.environment_id, "kubernetes")?;
     let namespace = required_string(target_details, "namespace")?;
@@ -213,7 +237,14 @@ fn execute_scale_deployment(
         .ok_or_else(|| "Approval target is missing replicas.".to_string())?;
     let config = KubernetesExecConfig::from_profile(&profile)?;
 
-    let mut command = Command::new("kubectl");
+    let kubectl = resolve_kubectl(
+        KubectlLocator {
+            resource_dir,
+            executable_dir,
+        },
+        config.kubectl_path.as_deref(),
+    )?;
+    let mut command = kubectl.command();
     config.apply(&mut command)?;
     command
         .arg("scale")
@@ -222,16 +253,18 @@ fn execute_scale_deployment(
         .arg("-n")
         .arg(&namespace)
         .arg(format!("--replicas={replicas}"));
-    let output = run_command_with_timeout(&mut command, Duration::from_secs(10), "kubectl scale deployment")?;
+    let label = format!("kubectl scale deployment using {}", kubectl.display_path());
+    let output = run_command_with_timeout(&mut command, Duration::from_secs(10), &label)?;
     if !output.status.success() {
-        return Err(command_error("kubectl scale deployment", &output));
+        return Err(command_error(&label, &output));
     }
 
     Ok(format!(
-        "Scaled deployment {} in namespace {} to {} replicas. {}",
+        "Scaled deployment {} in namespace {} to {} replicas via {}. {}",
         deployment,
         namespace,
         replicas,
+        kubectl.source_label,
         sanitize_and_mask_text(String::from_utf8_lossy(&output.stdout).trim())
     ))
 }
@@ -294,6 +327,7 @@ fn command_error(prefix: &str, output: &std::process::Output) -> String {
 struct KubernetesExecConfig {
     kubeconfig_path: Option<String>,
     context: Option<String>,
+    kubectl_path: Option<String>,
 }
 
 impl KubernetesExecConfig {
@@ -303,6 +337,7 @@ impl KubernetesExecConfig {
         Ok(Self {
             kubeconfig_path: config.get("kubeconfigPath").and_then(Value::as_str).map(str::to_string),
             context: config.get("context").and_then(Value::as_str).map(str::to_string),
+            kubectl_path: config.get("kubectlPath").and_then(Value::as_str).map(str::to_string),
         })
     }
 

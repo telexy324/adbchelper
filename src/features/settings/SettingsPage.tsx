@@ -50,6 +50,7 @@ type ProfileFormState = {
   secretValue: string;
   kubeconfigPath: string;
   kubeContext: string;
+  kubectlPath: string;
   sshHost: string;
   sshPort: string;
   sshAuthMode: "password" | "key" | "agent";
@@ -80,6 +81,7 @@ const emptyProfile = (): ProfileFormState => ({
   secretValue: "",
   kubeconfigPath: "",
   kubeContext: "",
+  kubectlPath: "",
   sshHost: "",
   sshPort: "22",
   sshAuthMode: "password",
@@ -652,6 +654,7 @@ function composeStructuredConfig(draft: ProfileFormState): Record<string, unknow
       return {
         kubeconfigPath: draft.kubeconfigPath.trim() || undefined,
         context: draft.kubeContext.trim() || undefined,
+        kubectlPath: draft.kubectlPath.trim() || undefined,
       };
     case "ssh":
       return {
@@ -780,6 +783,18 @@ function renderTypeSpecificFields(
                 setProfileDraft((current) => ({ ...current, kubeContext: event.target.value }))
               }
             />
+          </Field>
+          <Field label="Custom kubectl path">
+            <Input
+              placeholder="C:\\ops\\tools\\kubectl.exe"
+              value={profileDraft.kubectlPath}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, kubectlPath: event.target.value }))
+              }
+            />
+            <p className="text-xs leading-5 text-muted-foreground">
+              Optional. The app checks this path first, then bundled tools, then the system kubectl.
+            </p>
           </Field>
           <Field label="Default namespace">
             <Input
@@ -1068,6 +1083,7 @@ function profileToDraft(profile: ConnectionProfile): ProfileFormState {
     secretValue: "",
     kubeconfigPath: stringValue(rawConfig.kubeconfigPath),
     kubeContext: stringValue(rawConfig.context),
+    kubectlPath: stringValue(rawConfig.kubectlPath),
     sshHost: stringValue(rawConfig.host) || profile.endpoint,
     sshPort: stringValue(rawConfig.port) || "22",
     sshAuthMode: sshAuthModeValue(rawConfig.authMode),

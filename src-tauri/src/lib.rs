@@ -16,6 +16,8 @@ pub struct AppState {
     pub storage_path: String,
     pub app_data_dir: String,
     pub log_path: String,
+    pub resource_dir: String,
+    pub executable_dir: String,
 }
 
 fn resolve_app_data_dir(app: &tauri::AppHandle) -> PathBuf {
@@ -42,6 +44,14 @@ pub fn run() {
             let app_data_dir = resolve_app_data_dir(&app.handle());
             let database_status = bootstrap_storage(&app.handle());
             let log_file_path = log_path(&app_data_dir);
+            let resource_dir = app
+                .path()
+                .resource_dir()
+                .unwrap_or_else(|_| app_data_dir.clone());
+            let executable_dir = std::env::current_exe()
+                .ok()
+                .and_then(|path| path.parent().map(|parent| parent.to_path_buf()))
+                .unwrap_or_else(|| app_data_dir.clone());
             let _ = append_log(
                 &app_data_dir,
                 "INFO",
@@ -57,6 +67,8 @@ pub fn run() {
                 storage_path: database_status.storage_path.display().to_string(),
                 app_data_dir: app_data_dir.display().to_string(),
                 log_path: log_file_path.display().to_string(),
+                resource_dir: resource_dir.display().to_string(),
+                executable_dir: executable_dir.display().to_string(),
             });
             Ok(())
         })

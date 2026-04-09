@@ -46,3 +46,8 @@ coverage/
 
 # Misc caches
 .cache/
+
+# Local bundled tools
+tools/*.exe
+tools/*.dll
+tools/*.zip

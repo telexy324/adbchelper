@@ -466,7 +466,7 @@ pub fn validate_connection_profile(input: &UpsertConnectionProfileInput) -> Vali
         let config_json = input.config_json.clone().unwrap_or_default();
         if input.endpoint.trim().is_empty() && !config_json.contains("kubeconfigPath") {
             messages.push(
-                "Kubernetes profiles should provide an API endpoint or a kubeconfigPath in extra JSON."
+                "Kubernetes profiles should provide an API endpoint or a kubeconfig path."
                     .to_string(),
             );
         }

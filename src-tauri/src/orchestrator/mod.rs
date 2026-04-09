@@ -1,4 +1,5 @@
 pub mod chat;
+pub mod kubectl;
 pub mod kubernetes;
 pub mod logs;
 pub mod nacos;
