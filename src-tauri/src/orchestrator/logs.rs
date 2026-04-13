@@ -1,20 +1,35 @@
 use std::collections::{BTreeSet, HashMap};
+use std::path::Path;
 
 use chrono::{Duration, Utc};
-use rusqlite::Connection;
+use reqwest::Client;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
+use crate::hardening::{sanitize_and_mask_text, sanitize_untrusted_text};
 use crate::models::connection_profile::ConnectionProfile;
 use crate::models::logs::{LogCluster, LogEntry, LogSearchInput, LogSearchResponse, LogSummary};
-use crate::storage::db;
+use crate::storage::secrets;
 
-pub fn search_logs(
-    connection: &Connection,
+pub async fn search_logs(
+    profile: Option<ConnectionProfile>,
+    app_data_dir: &str,
     input: LogSearchInput,
 ) -> Result<LogSearchResponse, String> {
-    let adapter_mode = resolve_adapter_mode(connection, &input.environment_id)?;
     let query = build_query_string(&input);
-    let entries = filter_entries(sample_entries(), &input);
+
+    let (adapter_mode, entries) = match profile {
+        Some(profile) => {
+            let adapter_mode = format!("elk-http-search ({})", profile.endpoint);
+            let entries = fetch_elk_entries(&profile, app_data_dir, &input).await?;
+            (adapter_mode, entries)
+        }
+        None => {
+            let entries = filter_entries(sample_entries(), &input);
+            ("mock-elastic-adapter".to_string(), entries)
+        }
+    };
+
     let clusters = cluster_entries(&entries);
     let summary = build_summary(&input, &entries, &clusters);
 
@@ -29,18 +44,288 @@ pub fn search_logs(
     })
 }
 
-fn resolve_adapter_mode(connection: &Connection, environment_id: &str) -> Result<String, String> {
-    let elk_profile = db::list_connection_profiles(connection)
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .find(|profile| profile.environment_id == environment_id && profile.profile_type == "elk");
+async fn fetch_elk_entries(
+    profile: &ConnectionProfile,
+    app_data_dir: &str,
+    input: &LogSearchInput,
+) -> Result<Vec<LogEntry>, String> {
+    let config = ElkProfileConfig::from_profile(profile)?;
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|error| format!("Failed to build ELK HTTP client: {error}"))?;
+    let mut request = client
+        .post(config.search_url(&profile.endpoint))
+        .header("Content-Type", "application/json")
+        .json(&build_elk_query(input, &config));
 
-    Ok(match elk_profile {
-        Some(ConnectionProfile { endpoint, .. }) if !endpoint.trim().is_empty() => {
-            format!("elk-profile-configured ({endpoint})")
+    if let Some(space) = config.space.as_deref() {
+        request = request.header("kbn-space", space);
+    }
+
+    if let Some(username) = profile.username.as_deref().filter(|value| !value.trim().is_empty()) {
+        let password = secrets::get_profile_secret(Some(Path::new(app_data_dir)), &profile.id)
+            .map_err(|error| format!("Failed to load ELK secret for profile '{}': {}", profile.name, error))?;
+        request = request.basic_auth(username.to_string(), Some(password));
+    } else if profile.has_secret {
+        let token = secrets::get_profile_secret(Some(Path::new(app_data_dir)), &profile.id)
+            .map_err(|error| format!("Failed to load ELK secret for profile '{}': {}", profile.name, error))?;
+        request = request.bearer_auth(token);
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|error| format!("ELK request failed for {}: {error}", profile.name))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!(
+            "ELK request failed for {} with status {}: {}",
+            profile.name,
+            status,
+            sanitize_and_mask_text(body.trim())
+        ));
+    }
+
+    let payload = response
+        .json::<Value>()
+        .await
+        .map_err(|error| format!("Invalid ELK response for {}: {error}", profile.name))?;
+
+    Ok(parse_elk_hits(&payload, &input.environment_id))
+}
+
+fn build_elk_query(input: &LogSearchInput, config: &ElkProfileConfig) -> Value {
+    let mut filters = vec![json!({
+        "range": {
+            config.timestamp_field.as_str(): {
+                "gte": format!("now-{}", input.time_range),
+                "lte": "now"
+            }
         }
-        _ => "mock-elastic-adapter".to_string(),
+    })];
+
+    if let Some(service) = clean_filter(&input.service) {
+        filters.push(text_filter(&config.service_field, &service));
+    }
+    if let Some(pod) = clean_filter(&input.pod) {
+        filters.push(text_filter(&config.pod_field, &pod));
+    }
+    if let Some(keyword) = clean_filter(&input.keyword) {
+        filters.push(json!({
+            "multi_match": {
+                "query": keyword,
+                "fields": [
+                    config.message_field.as_str(),
+                    config.service_field.as_str(),
+                    config.pod_field.as_str(),
+                    config.trace_id_field.as_str()
+                ]
+            }
+        }));
+    }
+    if let Some(trace_id) = clean_filter(&input.trace_id) {
+        filters.push(text_filter(&config.trace_id_field, &trace_id));
+    }
+
+    json!({
+        "size": 200,
+        "sort": [
+            {
+                config.timestamp_field.as_str(): {
+                    "order": "desc"
+                }
+            }
+        ],
+        "_source": [
+            config.timestamp_field.as_str(),
+            config.message_field.as_str(),
+            config.level_field.as_str(),
+            config.service_field.as_str(),
+            config.pod_field.as_str(),
+            config.trace_id_field.as_str(),
+            "traceId",
+            "trace_id",
+            "kubernetes.pod.name",
+            "service.name",
+            "log.level",
+            "message"
+        ],
+        "query": {
+            "bool": {
+                "filter": filters
+            }
+        }
     })
+}
+
+fn text_filter(field: &str, value: &str) -> Value {
+    json!({
+        "query_string": {
+            "default_field": field,
+            "query": format!("*{}*", escape_query_string(value))
+        }
+    })
+}
+
+fn escape_query_string(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|ch| match ch {
+            '+' | '-' | '=' | '&' | '|' | '>' | '<' | '!' | '(' | ')' | '{' | '}' | '[' | ']'
+            | '^' | '"' | '~' | '*' | '?' | ':' | '\\' | '/' => ['\\', ch].into_iter().collect::<Vec<_>>(),
+            _ => vec![ch],
+        })
+        .collect()
+}
+
+fn parse_elk_hits(payload: &Value, environment_id: &str) -> Vec<LogEntry> {
+    payload
+        .get("hits")
+        .and_then(|value| value.get("hits"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|hit| {
+            let source = hit.get("_source")?;
+            let message = first_string(
+                source,
+                &[
+                    "message",
+                    "log.message",
+                    "error.message",
+                    "event.original",
+                ],
+            )
+            .unwrap_or_else(|| "".to_string());
+            if message.trim().is_empty() {
+                return None;
+            }
+
+            let timestamp = first_string(source, &["@timestamp", "timestamp", "time"])
+                .unwrap_or_else(|| Utc::now().to_rfc3339());
+            let service = first_string(source, &["service.name", "service", "app", "application"])
+                .unwrap_or_else(|| "unknown-service".to_string());
+            let pod = first_string(source, &["kubernetes.pod.name", "pod", "pod_name"])
+                .unwrap_or_else(|| "unknown-pod".to_string());
+            let level = first_string(source, &["log.level", "level", "severity"])
+                .unwrap_or_else(|| "INFO".to_string())
+                .to_ascii_uppercase();
+            let trace_id = first_string(
+                source,
+                &[
+                    "traceId",
+                    "trace_id",
+                    "trace.id",
+                    "mdc.traceId",
+                    "labels.traceId",
+                ],
+            );
+
+            Some(LogEntry {
+                id: hit
+                    .get("_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| Uuid::new_v4().to_string()),
+                timestamp,
+                environment_id: environment_id.to_string(),
+                service: sanitize_and_mask_text(&service),
+                pod: sanitize_and_mask_text(&pod),
+                level,
+                trace_id: trace_id.map(|value| sanitize_and_mask_text(&value)),
+                message: sanitize_untrusted_text(&message),
+            })
+        })
+        .collect()
+}
+
+fn first_string(value: &Value, paths: &[&str]) -> Option<String> {
+    for path in paths {
+        if let Some(found) = dotted_lookup(value, path).and_then(value_to_string) {
+            if !found.trim().is_empty() {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn dotted_lookup<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
+    let mut current = value;
+    for segment in path.split('.') {
+        current = current.get(segment)?;
+    }
+    Some(current)
+}
+
+fn value_to_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(flag) => Some(flag.to_string()),
+        Value::Array(items) => items.first().and_then(value_to_string),
+        _ => None,
+    }
+}
+
+struct ElkProfileConfig {
+    index_pattern: String,
+    timestamp_field: String,
+    message_field: String,
+    level_field: String,
+    service_field: String,
+    pod_field: String,
+    trace_id_field: String,
+    space: Option<String>,
+}
+
+impl ElkProfileConfig {
+    fn from_profile(profile: &ConnectionProfile) -> Result<Self, String> {
+        let config = serde_json::from_str::<Value>(&profile.config_json)
+            .unwrap_or_else(|_| Value::Object(Default::default()));
+
+        let index_pattern = config
+            .get("indexPattern")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("logs-*")
+            .to_string();
+
+        Ok(Self {
+            index_pattern,
+            timestamp_field: string_or_default(&config, "timestampField", "@timestamp"),
+            message_field: string_or_default(&config, "messageField", "message"),
+            level_field: string_or_default(&config, "levelField", "log.level"),
+            service_field: string_or_default(&config, "serviceField", "service.name"),
+            pod_field: string_or_default(&config, "podField", "kubernetes.pod.name"),
+            trace_id_field: string_or_default(&config, "traceIdField", "traceId"),
+            space: config
+                .get("space")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+        })
+    }
+
+    fn search_url(&self, endpoint: &str) -> String {
+        let trimmed = endpoint.trim_end_matches('/');
+        format!("{}/{}/_search", trimmed, self.index_pattern)
+    }
+}
+
+fn string_or_default(config: &Value, key: &str, default: &str) -> String {
+    config
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(default)
+        .to_string()
 }
 
 fn build_query_string(input: &LogSearchInput) -> String {
@@ -318,35 +603,17 @@ fn sample_entries() -> Vec<LogEntry> {
             "payment-api",
             "payment-api-54d95f7b8d-gv6dm",
             "WARN",
-            Some("trace-test-991"),
-            "Redis connection pool saturation warning while preparing checkout 991",
+            Some("trace-test-221"),
+            "Nacos config refresh took 420ms for dataId payment-service.yaml",
         ),
         log_entry(
-            now - Duration::minutes(38),
+            now - Duration::minutes(39),
             "test",
-            "order-api",
-            "order-api-6c5d889db8-2spxw",
-            "ERROR",
-            Some("trace-order-881"),
-            "Nacos config fetch failed for dataId order-service.yaml in DEFAULT_GROUP",
-        ),
-        log_entry(
-            now - Duration::minutes(18),
-            "dev",
-            "payment-api",
-            "payment-api-7d6f7fcf66-vw4lp",
-            "INFO",
-            Some("trace-dev-101"),
-            "Health check completed in 34ms for checkout request 101",
-        ),
-        log_entry(
-            now - Duration::minutes(11),
-            "dev",
             "gateway",
-            "gateway-7f9fcb4b78-vrghp",
-            "WARN",
-            Some("trace-dev-309"),
-            "Feature flag checkout.retry enabled for tenant 309",
+            "gateway-5cf7d459fd-7qk8f",
+            "ERROR",
+            Some("trace-test-223"),
+            "Downstream payment-api returned HTTP 504 for request 223",
         ),
     ]
 }

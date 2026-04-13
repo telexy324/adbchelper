@@ -123,6 +123,7 @@ export interface SendChatMessageInput {
   sessionId?: string;
   environmentId: string;
   investigationId?: string;
+  selectedEvidenceIds?: string[];
   content: string;
 }
 

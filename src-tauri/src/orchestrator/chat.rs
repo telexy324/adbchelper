@@ -297,8 +297,27 @@ fn build_investigation_context(
         ));
     }
 
-    let evidence = db::list_investigation_evidence(connection, investigation_id)
+    let mut evidence = db::list_investigation_evidence(connection, investigation_id)
         .map_err(|error| error.to_string())?;
+    let selected_evidence_ids = input
+        .selected_evidence_ids
+        .as_ref()
+        .map(|items| {
+            items.iter()
+                .map(|item| item.trim())
+                .filter(|item| !item.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    if !selected_evidence_ids.is_empty() {
+        evidence.retain(|item| selected_evidence_ids.iter().any(|selected| selected == &item.id));
+        if evidence.is_empty() {
+            return Err("None of the selected evidence items were found in this investigation.".to_string());
+        }
+    }
+
     let correlations = build_investigation_correlations(&evidence);
 
     Ok(Some(render_investigation_context(

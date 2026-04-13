@@ -47,6 +47,7 @@ pub struct SendChatMessageInput {
     pub session_id: Option<String>,
     pub environment_id: String,
     pub investigation_id: Option<String>,
+    pub selected_evidence_ids: Option<Vec<String>>,
     pub content: String,
 }
 

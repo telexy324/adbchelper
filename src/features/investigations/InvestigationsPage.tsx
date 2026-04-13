@@ -28,6 +28,7 @@ export function InvestigationsPage() {
   const [analysisMessages, setAnalysisMessages] = useState<ChatMessage[]>([]);
   const [analysisSessionId, setAnalysisSessionId] = useState<string | null>(null);
   const [isAskingQwen, setIsAskingQwen] = useState(false);
+  const [selectedEvidenceIds, setSelectedEvidenceIds] = useState<string[]>([]);
 
   useEffect(() => {
     async function loadInvestigations() {
@@ -54,6 +55,7 @@ export function InvestigationsPage() {
         setReport(null);
         setAnalysisMessages([]);
         setAnalysisSessionId(null);
+        setSelectedEvidenceIds([]);
         return;
       }
 
@@ -61,6 +63,7 @@ export function InvestigationsPage() {
         const nextDetail = await getInvestigationDetail(selectedInvestigationId);
         setDetail(nextDetail);
         setReport(null);
+        setSelectedEvidenceIds(nextDetail.evidence.map((item) => item.id));
       } catch (error) {
         setStatusMessage(error instanceof Error ? error.message : "Failed to load investigation detail.");
       }
@@ -104,6 +107,7 @@ export function InvestigationsPage() {
         sessionId: analysisSessionId ?? undefined,
         environmentId: selectedInvestigation.environmentId,
         investigationId: selectedInvestigation.id,
+        selectedEvidenceIds,
         content: analysisPrompt.trim(),
       });
       setAnalysisSessionId(response.session.id);
@@ -115,6 +119,15 @@ export function InvestigationsPage() {
     } finally {
       setIsAskingQwen(false);
     }
+  }
+
+  function toggleEvidenceSelection(evidenceId: string, checked: boolean) {
+    setSelectedEvidenceIds((current) => {
+      if (checked) {
+        return current.includes(evidenceId) ? current : [...current, evidenceId];
+      }
+      return current.filter((item) => item !== evidenceId);
+    });
   }
 
   return (
@@ -277,8 +290,58 @@ export function InvestigationsPage() {
                   <Badge variant="outline">{analysisSessionId ? "Existing Qwen session" : "New Qwen session"}</Badge>
                 </div>
                 <p className="mt-3 text-sm text-muted-foreground">
-                  Saved evidence is sent as investigation context before your prompt, with payloads trimmed for model input size.
+                  Choose the saved evidence you want Qwen to use. Only selected items are sent as investigation context, with payloads trimmed for model input size.
                 </p>
+              </div>
+              <div className="rounded-xl border bg-background/70 p-4">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-sm font-semibold">Evidence selection</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSelectedEvidenceIds(detail?.evidence.map((item) => item.id) ?? [])}
+                      disabled={!detail || detail.evidence.length === 0}
+                    >
+                      Select All
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSelectedEvidenceIds([])}
+                      disabled={selectedEvidenceIds.length === 0}
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                </div>
+                {detail === null || detail.evidence.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No saved evidence is available for this investigation yet.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {detail.evidence.map((item) => (
+                      <label
+                        key={item.id}
+                        className="flex items-start gap-3 rounded-lg border bg-muted/20 px-3 py-3 text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedEvidenceIds.includes(item.id)}
+                          onChange={(event) => toggleEvidenceSelection(item.id, event.target.checked)}
+                          className="mt-1"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium text-foreground">{item.title}</span>
+                            <Badge variant="outline">{item.evidenceType}</Badge>
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">{item.createdAt}</p>
+                          <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">{item.summary}</p>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                )}
               </div>
               <Textarea
                 className="min-h-28"
@@ -287,7 +350,10 @@ export function InvestigationsPage() {
                 onChange={(event) => setAnalysisPrompt(event.target.value)}
               />
               <div className="flex flex-wrap gap-3">
-                <Button onClick={() => void handleAskQwen()} disabled={isAskingQwen || !analysisPrompt.trim()}>
+                <Button
+                  onClick={() => void handleAskQwen()}
+                  disabled={isAskingQwen || !analysisPrompt.trim() || selectedEvidenceIds.length === 0}
+                >
                   {isAskingQwen ? "Sending..." : "Send Evidence To Qwen"}
                 </Button>
                 <Button
@@ -302,6 +368,9 @@ export function InvestigationsPage() {
                   New Analysis Session
                 </Button>
               </div>
+              <p className="text-xs text-muted-foreground">
+                {selectedEvidenceIds.length} evidence item(s) selected for the next Qwen request.
+              </p>
               <div className="space-y-3">
                 {analysisMessages.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
