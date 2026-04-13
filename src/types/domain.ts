@@ -122,6 +122,7 @@ export interface ToolDefinition {
 export interface SendChatMessageInput {
   sessionId?: string;
   environmentId: string;
+  investigationId?: string;
   content: string;
 }
 

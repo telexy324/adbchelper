@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { SectionCard } from "../../components/SectionCard";
 import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
+import { Textarea } from "../../components/ui/textarea";
 import {
   generateInvestigationReport,
   getInvestigationDetail,
   listInvestigations,
+  sendChatMessage,
 } from "../../lib/tauri";
 import type {
+  ChatMessage,
   InvestigationDetail,
   InvestigationReport,
   InvestigationSummary,
@@ -20,6 +24,10 @@ export function InvestigationsPage() {
   const [reportView, setReportView] = useState<"markdown" | "html">("markdown");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [analysisPrompt, setAnalysisPrompt] = useState("");
+  const [analysisMessages, setAnalysisMessages] = useState<ChatMessage[]>([]);
+  const [analysisSessionId, setAnalysisSessionId] = useState<string | null>(null);
+  const [isAskingQwen, setIsAskingQwen] = useState(false);
 
   useEffect(() => {
     async function loadInvestigations() {
@@ -44,6 +52,8 @@ export function InvestigationsPage() {
       if (!selectedInvestigationId) {
         setDetail(null);
         setReport(null);
+        setAnalysisMessages([]);
+        setAnalysisSessionId(null);
         return;
       }
 
@@ -79,6 +89,31 @@ export function InvestigationsPage() {
       setStatusMessage(error instanceof Error ? error.message : "Failed to generate report.");
     } finally {
       setIsGenerating(false);
+    }
+  }
+
+  async function handleAskQwen() {
+    if (!selectedInvestigation || !analysisPrompt.trim()) {
+      return;
+    }
+
+    setIsAskingQwen(true);
+    setStatusMessage(null);
+    try {
+      const response = await sendChatMessage({
+        sessionId: analysisSessionId ?? undefined,
+        environmentId: selectedInvestigation.environmentId,
+        investigationId: selectedInvestigation.id,
+        content: analysisPrompt.trim(),
+      });
+      setAnalysisSessionId(response.session.id);
+      setAnalysisMessages(response.messages);
+      setAnalysisPrompt("");
+      setStatusMessage(`Qwen analyzed investigation "${selectedInvestigation.title}".`);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Failed to analyze investigation with Qwen.");
+    } finally {
+      setIsAskingQwen(false);
     }
   }
 
@@ -222,6 +257,74 @@ export function InvestigationsPage() {
               ))
             )}
           </div>
+        </SectionCard>
+
+        <SectionCard
+          eyebrow="Qwen Analysis"
+          title="Ask Qwen About This Investigation"
+          description="Send the selected investigation's saved evidence, timeline, and cross-source correlations to Qwen for synthesis."
+        >
+          {!selectedInvestigation ? (
+            <p className="text-sm text-muted-foreground">
+              Choose an investigation first, then ask Qwen to summarize root cause, impact, or next steps.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              <div className="rounded-xl border bg-muted/20 p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary">{selectedInvestigation.environmentId}</Badge>
+                  <Badge variant="outline">{detail?.evidence.length ?? 0} evidence item(s)</Badge>
+                  <Badge variant="outline">{analysisSessionId ? "Existing Qwen session" : "New Qwen session"}</Badge>
+                </div>
+                <p className="mt-3 text-sm text-muted-foreground">
+                  Saved evidence is sent as investigation context before your prompt, with payloads trimmed for model input size.
+                </p>
+              </div>
+              <Textarea
+                className="min-h-28"
+                placeholder="Ask something like: summarize the likely root cause from this evidence and tell me what to verify next."
+                value={analysisPrompt}
+                onChange={(event) => setAnalysisPrompt(event.target.value)}
+              />
+              <div className="flex flex-wrap gap-3">
+                <Button onClick={() => void handleAskQwen()} disabled={isAskingQwen || !analysisPrompt.trim()}>
+                  {isAskingQwen ? "Sending..." : "Send Evidence To Qwen"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setAnalysisSessionId(null);
+                    setAnalysisMessages([]);
+                    setStatusMessage("Started a fresh investigation analysis session.");
+                  }}
+                  disabled={isAskingQwen}
+                >
+                  New Analysis Session
+                </Button>
+              </div>
+              <div className="space-y-3">
+                {analysisMessages.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No analysis messages yet. The first question will send the selected investigation context to Qwen.
+                  </p>
+                ) : (
+                  analysisMessages.map((message) => (
+                    <article className="rounded-xl border bg-background/80 p-4" key={message.id}>
+                      <div className="flex items-center justify-between gap-3">
+                        <Badge variant={message.role === "assistant" ? "default" : "outline"}>
+                          {message.role}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">{message.createdAt}</span>
+                      </div>
+                      <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-foreground">
+                        {message.content}
+                      </p>
+                    </article>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
         </SectionCard>
 
         <SectionCard

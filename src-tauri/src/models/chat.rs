@@ -46,6 +46,7 @@ pub struct ChatResponse {
 pub struct SendChatMessageInput {
     pub session_id: Option<String>,
     pub environment_id: String,
+    pub investigation_id: Option<String>,
     pub content: String,
 }
 
