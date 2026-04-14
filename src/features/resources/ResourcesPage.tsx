@@ -88,7 +88,7 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
   const [investigations, setInvestigations] = useState<InvestigationSummary[]>([]);
   const [attachChatSessionId, setAttachChatSessionId] = useState<string>("new");
   const [attachInvestigationId, setAttachInvestigationId] = useState<string>("new");
-  const [investigationTitle, setInvestigationTitle] = useState("Nacos drift investigation");
+  const [investigationTitle, setInvestigationTitle] = useState("");
   const [logStatusMessage, setLogStatusMessage] = useState<string | null>(null);
   const [sshStatusMessage, setSshStatusMessage] = useState<string | null>(null);
   const [kubernetesStatusMessage, setKubernetesStatusMessage] = useState<string | null>(null);
@@ -290,12 +290,17 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
       return;
     }
 
+    const target = resolveInvestigationTarget(nacosResults.targetEnvironmentId);
+    if (!target) {
+      return;
+    }
+
     setIsAttachingInvestigation(true);
     setAttachStatusMessage(null);
     try {
       const response = await saveInvestigationEvidence({
-        investigationId: attachInvestigationId === "new" ? undefined : attachInvestigationId,
-        title: attachInvestigationId === "new" ? investigationTitle.trim() || "Nacos drift investigation" : undefined,
+        investigationId: target.investigationId,
+        title: target.title,
         environmentId: nacosResults.targetEnvironmentId,
         evidenceType: "nacos_diff",
         evidenceTitle: `${nacosResults.dataId} drift`,
@@ -322,15 +327,17 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
     summary: string;
     contentJson: string;
   }) {
+    const target = resolveInvestigationTarget(options.environmentId);
+    if (!target) {
+      return;
+    }
+
     setIsAttachingInvestigation(true);
     setAttachStatusMessage(null);
     try {
       const response = await saveInvestigationEvidence({
-        investigationId: attachInvestigationId === "new" ? undefined : attachInvestigationId,
-        title:
-          attachInvestigationId === "new"
-            ? investigationTitle.trim() || "Cross-source investigation"
-            : undefined,
+        investigationId: target.investigationId,
+        title: target.title,
         environmentId: options.environmentId,
         evidenceType: options.evidenceType,
         evidenceTitle: options.title,
@@ -382,6 +389,46 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
             body="Review INFO health, slow queries, response-time spikes, and Redis log warnings in one workbench."
           />
         </div>
+      </SectionCard>
+
+      <SectionCard
+        eyebrow="Evidence Target"
+        title="Current Investigation Target"
+        description="Resource evidence attaches to the selected case below. If no case is selected, the app can reuse an existing case in the same environment or create a new one with the name you provide."
+      >
+        <div className="grid gap-4 md:grid-cols-[1fr_1fr]">
+          <Field label="Investigation">
+            <select
+              className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
+              value={attachInvestigationId}
+              onChange={(event) => {
+                const nextInvestigationId = event.target.value;
+                setAttachInvestigationId(nextInvestigationId);
+                if (nextInvestigationId === "new") {
+                  return;
+                }
+                const existing = investigations.find((investigation) => investigation.id === nextInvestigationId);
+                setInvestigationTitle(existing?.title ?? "");
+              }}
+            >
+              <option value="new">Create new investigation</option>
+              {investigations.map((investigation) => (
+                <option key={investigation.id} value={investigation.id}>
+                  {investigation.title} ({investigation.environmentId})
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="New investigation title">
+            <Input
+              placeholder="Name this case"
+              value={investigationTitle}
+              onChange={(event) => setInvestigationTitle(event.target.value)}
+              disabled={attachInvestigationId !== "new"}
+            />
+          </Field>
+        </div>
+        {attachStatusMessage ? <p className="mt-3 text-sm text-muted-foreground">{attachStatusMessage}</p> : null}
       </SectionCard>
 
       <SectionCard
@@ -490,6 +537,9 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
             >
               {isAttachingInvestigation ? "Saving..." : "Attach Events To Investigation"}
             </Button>
+            <p className="text-xs text-muted-foreground">
+              {describeInvestigationTarget(attachInvestigationId, investigationTitle, investigations, kubernetesResults.environmentId)}
+            </p>
           </div>
         ) : null}
       </SectionCard>
@@ -653,6 +703,9 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
             >
               {isAttachingInvestigation ? "Saving..." : "Attach Redis Analysis To Investigation"}
             </Button>
+            <p className="text-xs text-muted-foreground">
+              {describeInvestigationTarget(attachInvestigationId, investigationTitle, investigations, redisResults.environmentId)}
+            </p>
           </div>
         ) : null}
       </SectionCard>
@@ -777,6 +830,9 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
             >
               {isAttachingInvestigation ? "Saving..." : "Attach Logs To Investigation"}
             </Button>
+            <p className="text-xs text-muted-foreground">
+              {describeInvestigationTarget(attachInvestigationId, investigationTitle, investigations, logResults.environmentId)}
+            </p>
           </div>
         ) : null}
       </SectionCard>
@@ -910,6 +966,9 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
               >
                 {isAttachingInvestigation ? "Saving..." : "Attach SSH Evidence To Investigation"}
               </Button>
+              <p className="text-xs text-muted-foreground">
+                {describeInvestigationTarget(attachInvestigationId, investigationTitle, investigations, sshResults.environmentId)}
+              </p>
             </div>
           ) : null}
         </SectionCard>
@@ -1143,7 +1202,15 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
                       <select
                         className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
                         value={attachInvestigationId}
-                        onChange={(event) => setAttachInvestigationId(event.target.value)}
+                        onChange={(event) => {
+                          const nextInvestigationId = event.target.value;
+                          setAttachInvestigationId(nextInvestigationId);
+                          if (nextInvestigationId === "new") {
+                            return;
+                          }
+                          const existing = investigations.find((investigation) => investigation.id === nextInvestigationId);
+                          setInvestigationTitle(existing?.title ?? "");
+                        }}
                       >
                         <option value="new">Create new investigation</option>
                         {investigations
@@ -1158,9 +1225,13 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
                     {attachInvestigationId === "new" ? (
                       <Field label="New investigation title">
                         <Input
+                          placeholder="Name this case"
                           value={investigationTitle}
                           onChange={(event) => setInvestigationTitle(event.target.value)}
                         />
+                        <p className="text-xs text-muted-foreground">
+                          Choose an existing investigation above, or enter a name here to create a new one.
+                        </p>
                       </Field>
                     ) : null}
                     <Button onClick={() => void handleAttachToInvestigation()} disabled={isAttachingInvestigation}>
@@ -1169,7 +1240,6 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
                   </div>
                 </div>
               </div>
-              {attachStatusMessage ? <p className="text-sm text-muted-foreground">{attachStatusMessage}</p> : null}
             </div>
           </div>
         ) : null}
@@ -1201,6 +1271,30 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
   ) {
     setNacosFilters((current) => ({ ...current, [key]: value }));
   }
+
+  function resolveInvestigationTarget(environmentId: string): { investigationId?: string; title?: string } | null {
+    if (attachInvestigationId !== "new") {
+      return { investigationId: attachInvestigationId };
+    }
+
+    const explicitTitle = investigationTitle.trim();
+    if (explicitTitle) {
+      return { title: explicitTitle };
+    }
+
+    const existingForEnvironment = investigations.find(
+      (investigation) => investigation.environmentId === environmentId,
+    );
+    if (existingForEnvironment) {
+      setAttachInvestigationId(existingForEnvironment.id);
+      setInvestigationTitle(existingForEnvironment.title);
+      setAttachStatusMessage(`Using existing investigation "${existingForEnvironment.title}" for ${environmentId}.`);
+      return { investigationId: existingForEnvironment.id };
+    }
+
+    setAttachStatusMessage("Choose an existing investigation or enter a case name before saving evidence.");
+    return null;
+  }
 }
 
 function normalizeNacosInput(input: CompareNacosConfigInput): CompareNacosConfigInput {
@@ -1217,6 +1311,33 @@ function updateRedisFilter<Key extends keyof AnalyzeRedisInput>(
   value: AnalyzeRedisInput[Key],
 ) {
   // placeholder for patch context
+}
+
+function describeInvestigationTarget(
+  attachInvestigationId: string,
+  investigationTitle: string,
+  investigations: InvestigationSummary[],
+  environmentId: string,
+): string {
+  if (attachInvestigationId !== "new") {
+    const existing = investigations.find((investigation) => investigation.id === attachInvestigationId);
+    return existing
+      ? `Current target: existing investigation "${existing.title}" (${existing.environmentId}).`
+      : "Current target: selected existing investigation.";
+  }
+
+  if (investigationTitle.trim()) {
+    return `Current target: new investigation "${investigationTitle.trim()}".`;
+  }
+
+  const existingForEnvironment = investigations.find(
+    (investigation) => investigation.environmentId === environmentId,
+  );
+  if (existingForEnvironment) {
+    return `Current target: no new case name set, so the app will reuse "${existingForEnvironment.title}" in ${environmentId}.`;
+  }
+
+  return `Current target: none selected for ${environmentId}. Enter a case name above or pick an existing investigation.`;
 }
 
 function normalizeKubernetesInput(input: ListKubernetesEventsInput): ListKubernetesEventsInput {

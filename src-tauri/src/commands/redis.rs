@@ -16,7 +16,7 @@ pub fn analyze_redis(
     input: AnalyzeRedisInput,
 ) -> Result<AnalyzeRedisResponse, String> {
     let connection = open_connection(&state.storage_path)?;
-    let response = redis::analyze_redis(&connection, input)?;
+    let response = redis::analyze_redis(&connection, &state.app_data_dir, input)?;
 
     db::insert_audit_log(
         &connection,
