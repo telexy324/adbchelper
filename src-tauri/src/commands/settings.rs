@@ -13,6 +13,7 @@ use crate::models::connection_profile::{
     ConnectionProfile, UpsertConnectionProfileInput, UpsertEnvironmentInput, ValidationResult,
 };
 use crate::models::environment::EnvironmentProfile;
+use crate::models::ssh::SshKeyPairResult;
 use crate::storage::db;
 use crate::storage::secrets;
 use crate::AppState;
@@ -142,6 +143,49 @@ pub fn trust_ssh_host_key(
         ssh_config.render_target(),
         ssh_config.known_hosts_path.display()
     ))
+}
+
+#[tauri::command]
+pub fn prepare_ssh_rsa_keypair(
+    state: State<'_, AppState>,
+    profile_id: String,
+) -> Result<SshKeyPairResult, String> {
+    let connection = open_connection(&state.storage_path)?;
+    let profile = db::get_connection_profile(&connection, &profile_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "SSH profile not found.".to_string())?;
+
+    if profile.profile_type != "ssh" {
+        return Err("RSA key preparation is only available for SSH profiles.".to_string());
+    }
+
+    let keys_dir = Path::new(&state.app_data_dir).join("ssh_keys");
+    fs::create_dir_all(&keys_dir).map_err(|error| format!("Failed to prepare SSH key directory: {error}"))?;
+    let private_key_path = keys_dir.join(format!("{profile_id}_rsa"));
+    let public_key_path = PathBuf::from(format!("{}.pub", private_key_path.display()));
+    let created = if private_key_path.exists() && public_key_path.exists() {
+        false
+    } else {
+        generate_rsa_keypair(&private_key_path, &profile.name)?;
+        true
+    };
+
+    let public_key = fs::read_to_string(&public_key_path)
+        .map_err(|error| format!("Failed to read generated SSH public key: {error}"))?;
+    let updated_profile = save_profile_with_rsa_keypair(
+        &connection,
+        &profile,
+        &private_key_path,
+        &public_key_path,
+    )?;
+
+    Ok(SshKeyPairResult {
+        profile: updated_profile,
+        private_key_path: private_key_path.display().to_string(),
+        public_key_path: public_key_path.display().to_string(),
+        public_key: public_key.trim().to_string(),
+        created,
+    })
 }
 
 #[derive(Debug)]
@@ -344,4 +388,70 @@ fn parse_host_and_port(endpoint: &str) -> Result<(String, Option<u16>), String> 
     }
 
     Ok((endpoint.to_string(), None))
+}
+
+fn generate_rsa_keypair(private_key_path: &Path, profile_name: &str) -> Result<(), String> {
+    let mut command = Command::new("ssh-keygen");
+    command.arg("-q");
+    command.arg("-t").arg("rsa");
+    command.arg("-b").arg("4096");
+    command.arg("-m").arg("PEM");
+    command.arg("-N").arg("");
+    command.arg("-f").arg(private_key_path);
+    command.arg("-C").arg(format!("adbchelper:{profile_name}"));
+
+    let output = run_command_with_timeout(&mut command, Duration::from_secs(10), "ssh-keygen")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "ssh-keygen failed without stderr output.".to_string()
+        } else {
+            format!("ssh-keygen failed: {stderr}")
+        });
+    }
+
+    Ok(())
+}
+
+fn save_profile_with_rsa_keypair(
+    connection: &Connection,
+    profile: &ConnectionProfile,
+    private_key_path: &Path,
+    public_key_path: &Path,
+) -> Result<ConnectionProfile, String> {
+    let mut config = if profile.config_json.trim().is_empty() {
+        Value::Object(Default::default())
+    } else {
+        serde_json::from_str::<Value>(&profile.config_json)
+            .unwrap_or_else(|_| Value::Object(Default::default()))
+    };
+
+    let object = config
+        .as_object_mut()
+        .ok_or_else(|| "SSH profile config must be a JSON object.".to_string())?;
+    object.insert("authMode".to_string(), Value::String("rsa".to_string()));
+    object.insert(
+        "privateKeyPath".to_string(),
+        Value::String(private_key_path.display().to_string()),
+    );
+    object.insert(
+        "publicKeyPath".to_string(),
+        Value::String(public_key_path.display().to_string()),
+    );
+
+    let input = UpsertConnectionProfileInput {
+        id: Some(profile.id.clone()),
+        environment_id: profile.environment_id.clone(),
+        profile_type: profile.profile_type.clone(),
+        name: profile.name.clone(),
+        endpoint: profile.endpoint.clone(),
+        username: profile.username.clone(),
+        default_scope: profile.default_scope.clone(),
+        notes: profile.notes.clone(),
+        config_json: Some(serde_json::to_string(&config).map_err(|error| error.to_string())?),
+        secret_value: None,
+    };
+
+    db::upsert_connection_profile(connection, &input, &profile.id, profile.has_secret)
+        .map_err(|error| error.to_string())
 }

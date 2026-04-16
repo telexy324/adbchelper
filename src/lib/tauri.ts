@@ -31,6 +31,7 @@ import type {
   SendChatMessageInput,
   SshDiagnosticsInput,
   SshDiagnosticsResponse,
+  SshKeyPairResult,
   ToolDefinition,
   UpsertConnectionProfileInput,
   UpsertEnvironmentInput,
@@ -97,6 +98,10 @@ export async function deleteConnectionProfile(profileId: string): Promise<void> 
 
 export async function trustSshHostKey(profileId: string): Promise<string> {
   return invoke<string>("trust_ssh_host_key", { profileId });
+}
+
+export async function prepareSshRsaKeypair(profileId: string): Promise<SshKeyPairResult> {
+  return invoke<SshKeyPairResult>("prepare_ssh_rsa_keypair", { profileId });
 }
 
 export async function listChatSessions(): Promise<ChatSession[]> {

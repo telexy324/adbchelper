@@ -419,7 +419,7 @@ impl SshConfig {
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .unwrap_or(if private_key_path.is_some() { "key" } else { "agent" })
+            .unwrap_or(if private_key_path.is_some() { "rsa" } else { "agent" })
             .to_string();
         let known_hosts_path = config
             .get("knownHostsPath")

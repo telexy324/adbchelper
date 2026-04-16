@@ -4,6 +4,7 @@ import type {
   ConnectionProfile,
   ConnectionProfileType,
   EnvironmentProfile,
+  SshKeyPairResult,
   UpsertConnectionProfileInput,
   UpsertEnvironmentInput,
   ValidationResult,
@@ -18,6 +19,7 @@ import {
   clearConnectionProfileSecret,
   deleteConnectionProfile,
   listConnectionProfiles,
+  prepareSshRsaKeypair,
   saveConnectionProfile,
   saveEnvironment,
   trustSshHostKey,
@@ -54,8 +56,10 @@ type ProfileFormState = {
   kubectlPath: string;
   sshHost: string;
   sshPort: string;
-  sshAuthMode: "password" | "key" | "agent";
+  sshAuthMode: "password" | "key" | "rsa" | "agent";
   sshPrivateKeyPath: string;
+  sshPublicKeyPath: string;
+  sshPublicKey: string;
   sshStrictHostKeyChecking: boolean;
   sshKnownHostsPath: string;
   elkIndexPattern: string;
@@ -89,6 +93,8 @@ const emptyProfile = (): ProfileFormState => ({
   sshPort: "22",
   sshAuthMode: "password",
   sshPrivateKeyPath: "",
+  sshPublicKeyPath: "",
+  sshPublicKey: "",
   sshStrictHostKeyChecking: true,
   sshKnownHostsPath: "",
   elkIndexPattern: "",
@@ -118,6 +124,7 @@ export function SettingsPage({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
+  const [sshKeyResults, setSshKeyResults] = useState<Record<string, SshKeyPairResult>>({});
 
   useEffect(() => {
     setEnvironmentDrafts(environments.map((environment) => ({ ...environment })));
@@ -250,6 +257,30 @@ export function SettingsPage({
       setStatusMessage(message);
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Failed to trust SSH host key.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handlePrepareSshRsa(profile: ConnectionProfile) {
+    setIsSaving(true);
+    setStatusMessage(null);
+    try {
+      const result = await prepareSshRsaKeypair(profile.id);
+      setSshKeyResults((current) => ({ ...current, [profile.id]: result }));
+      setConnectionProfiles((current) =>
+        current.map((item) => (item.id === result.profile.id ? result.profile : item)),
+      );
+      if (activeProfileId === result.profile.id) {
+        setProfileDraft(profileToDraft(result.profile, result.publicKey));
+      }
+      setStatusMessage(
+        result.created
+          ? `Generated RSA keypair for ${result.profile.name}. Copy the public key to the server authorized_keys file.`
+          : `Loaded existing RSA public key for ${result.profile.name}.`,
+      );
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Failed to prepare RSA keypair.");
     } finally {
       setIsSaving(false);
     }
@@ -518,7 +549,9 @@ export function SettingsPage({
               <p className="text-xs leading-5 text-muted-foreground">
                 {profileDraft.profileType === "qwen"
                   ? "Use this field for Qwen app_secret. It is stored in the system keychain, not in SQLite."
-                  : "Use this for passwords, tokens, or API keys. It is stored in the system keychain, not in SQLite."}
+                  : profileDraft.profileType === "ssh" && profileDraft.sshAuthMode === "rsa"
+                    ? "Optional: use this for the RSA private key passphrase if your key is protected."
+                    : "Use this for passwords, tokens, or API keys. It is stored in the system keychain, not in SQLite."}
               </p>
             </Field>
             <div className="flex flex-wrap gap-3">
@@ -580,6 +613,14 @@ export function SettingsPage({
                           <div className="mt-3">
                             <div className="flex flex-wrap gap-2">
                               <Button
+                                onClick={() => void handlePrepareSshRsa(profile)}
+                                size="sm"
+                                variant="secondary"
+                                disabled={profile.profileType !== "ssh" || isSaving}
+                              >
+                                Prepare RSA Key
+                              </Button>
+                              <Button
                                 onClick={() => void handleTrustSshHostKey(profile)}
                                 size="sm"
                                 variant="secondary"
@@ -613,6 +654,27 @@ export function SettingsPage({
                                 Delete
                               </Button>
                             </div>
+                            {sshKeyResults[profile.id] ? (
+                              <div className="mt-4 space-y-2 rounded-lg border bg-background/80 p-3">
+                                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                                  SSH Public Key
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  Private key: {sshKeyResults[profile.id].privateKeyPath}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  Public key: {sshKeyResults[profile.id].publicKeyPath}
+                                </p>
+                                <Textarea
+                                  className="min-h-24 font-mono text-xs"
+                                  readOnly
+                                  value={sshKeyResults[profile.id].publicKey}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                  Copy this line into the target user&apos;s `~/.ssh/authorized_keys`.
+                                </p>
+                              </div>
+                            ) : null}
                           </div>
                         </div>
                       ))
@@ -688,6 +750,7 @@ function composeStructuredConfig(draft: ProfileFormState): Record<string, unknow
         port: toNumberOrUndefined(draft.sshPort),
         authMode: draft.sshAuthMode,
         privateKeyPath: draft.sshPrivateKeyPath.trim() || undefined,
+        publicKeyPath: draft.sshPublicKeyPath.trim() || undefined,
         strictHostKeyChecking: draft.sshStrictHostKeyChecking,
         knownHostsPath: draft.sshKnownHostsPath.trim() || undefined,
       };
@@ -909,20 +972,44 @@ function renderTypeSpecificFields(
               }
             >
               <option value="password">password</option>
-              <option value="key">private key</option>
+              <option value="rsa">rsa key pair</option>
               <option value="agent">ssh agent</option>
             </select>
           </Field>
-          {profileDraft.sshAuthMode === "key" ? (
-            <Field label="Private key path">
-              <Input
-                placeholder="~/.ssh/id_ed25519"
-                value={profileDraft.sshPrivateKeyPath}
-                onChange={(event) =>
-                  setProfileDraft((current) => ({ ...current, sshPrivateKeyPath: event.target.value }))
-                }
-              />
-            </Field>
+          {profileDraft.sshAuthMode === "rsa" || profileDraft.sshAuthMode === "key" ? (
+            <>
+              <Field label="Private key path">
+                <Input
+                  placeholder="C:\\Users\\you\\.ssh\\id_rsa"
+                  value={profileDraft.sshPrivateKeyPath}
+                  onChange={(event) =>
+                    setProfileDraft((current) => ({ ...current, sshPrivateKeyPath: event.target.value }))
+                  }
+                />
+              </Field>
+              <Field label="Public key path">
+                <Input
+                  placeholder="C:\\Users\\you\\.ssh\\id_rsa.pub"
+                  value={profileDraft.sshPublicKeyPath}
+                  onChange={(event) =>
+                    setProfileDraft((current) => ({ ...current, sshPublicKeyPath: event.target.value }))
+                  }
+                />
+                <p className="text-xs leading-5 text-muted-foreground">
+                  Save the profile first, then use `Prepare RSA Key` on the saved SSH profile card to generate an RSA keypair automatically.
+                </p>
+              </Field>
+              <Field label="Public key preview">
+                <Textarea
+                  className="min-h-24 font-mono text-xs"
+                  placeholder="The generated or loaded RSA public key will appear here."
+                  value={profileDraft.sshPublicKey}
+                  onChange={(event) =>
+                    setProfileDraft((current) => ({ ...current, sshPublicKey: event.target.value }))
+                  }
+                />
+              </Field>
+            </>
           ) : null}
           <ToggleField
             checked={profileDraft.sshStrictHostKeyChecking}
@@ -1114,7 +1201,7 @@ function toNumberOrUndefined(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function profileToDraft(profile: ConnectionProfile): ProfileFormState {
+function profileToDraft(profile: ConnectionProfile, sshPublicKey = ""): ProfileFormState {
   const rawConfig = tryParseConfig(profile.configJson);
 
   return {
@@ -1135,6 +1222,8 @@ function profileToDraft(profile: ConnectionProfile): ProfileFormState {
     sshPort: stringValue(rawConfig.port) || "22",
     sshAuthMode: sshAuthModeValue(rawConfig.authMode),
     sshPrivateKeyPath: stringValue(rawConfig.privateKeyPath),
+    sshPublicKeyPath: stringValue(rawConfig.publicKeyPath),
+    sshPublicKey,
     sshStrictHostKeyChecking:
       rawConfig.strictHostKeyChecking === undefined ? true : booleanValue(rawConfig.strictHostKeyChecking),
     sshKnownHostsPath: stringValue(rawConfig.knownHostsPath),
@@ -1178,7 +1267,10 @@ function booleanValue(value: unknown): boolean {
 }
 
 function sshAuthModeValue(value: unknown): ProfileFormState["sshAuthMode"] {
-  return value === "key" || value === "agent" ? value : "password";
+  if (value === "key" || value === "rsa") {
+    return "rsa";
+  }
+  return value === "agent" ? "agent" : "password";
 }
 
 function nacosApiVersionValue(value: unknown): ProfileFormState["nacosApiVersion"] {

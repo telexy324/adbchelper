@@ -231,6 +231,14 @@ export interface SshDiagnosticsResponse {
   recommendedActions: string[];
 }
 
+export interface SshKeyPairResult {
+  profile: ConnectionProfile;
+  privateKeyPath: string;
+  publicKeyPath: string;
+  publicKey: string;
+  created: boolean;
+}
+
 export interface CompareNacosConfigInput {
   sourceEnvironmentId: string;
   targetEnvironmentId: string;

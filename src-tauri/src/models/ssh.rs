@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::models::connection_profile::ConnectionProfile;
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SshDiagnosticsInput {
@@ -40,4 +42,14 @@ pub struct SshDiagnosticsResponse {
     pub log_lines: Vec<SshLogLine>,
     pub summary_headline: String,
     pub recommended_actions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshKeyPairResult {
+    pub profile: ConnectionProfile,
+    pub private_key_path: String,
+    pub public_key_path: String,
+    pub public_key: String,
+    pub created: bool,
 }

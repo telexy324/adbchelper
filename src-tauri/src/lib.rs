@@ -101,7 +101,8 @@ pub fn run() {
             commands::settings::save_connection_profile,
             commands::settings::clear_connection_profile_secret,
             commands::settings::delete_connection_profile,
-            commands::settings::trust_ssh_host_key
+            commands::settings::trust_ssh_host_key,
+            commands::settings::prepare_ssh_rsa_keypair
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

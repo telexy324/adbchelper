@@ -486,8 +486,8 @@ pub fn validate_connection_profile(input: &UpsertConnectionProfileInput) -> Vali
         if let Some(config_json) = &input.config_json {
             if let Ok(config) = serde_json::from_str::<serde_json::Value>(config_json) {
                 if let Some(auth_mode) = config.get("authMode").and_then(serde_json::Value::as_str) {
-                    if !matches!(auth_mode, "agent" | "key" | "password") {
-                        messages.push("SSH authMode must be one of agent, key, or password.".to_string());
+                    if !matches!(auth_mode, "agent" | "key" | "rsa" | "password") {
+                        messages.push("SSH authMode must be one of agent, key, rsa, or password.".to_string());
                     }
                 }
                 if let Some(private_key_path) = config.get("privateKeyPath").and_then(serde_json::Value::as_str) {
