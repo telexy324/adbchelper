@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
+use std::{fs, path::PathBuf};
 
 use chrono::Utc;
 use rusqlite::Connection;
@@ -28,17 +29,21 @@ const COMMAND_PRESETS: [(&str, &str); 4] = [
 
 pub fn run_diagnostics(
     connection: &Connection,
+    app_data_dir: &str,
     input: SshDiagnosticsInput,
 ) -> Result<SshDiagnosticsResponse, String> {
     let profile = resolve_ssh_profile(connection, &input.environment_id)?;
     let ssh_config = SshConfig::from_profile(&profile, input.host.as_deref())?;
     let secret = if profile.has_secret {
-        Some(secrets::get_profile_secret(None, &profile.id).map_err(|error| error.to_string())?)
+        Some(
+            secrets::get_profile_secret(Some(Path::new(app_data_dir)), &profile.id)
+                .map_err(|error| error.to_string())?,
+        )
     } else {
         None
     };
     let remote_command = resolve_command(&input.command_preset, input.log_path.as_deref())?;
-    let execution = execute_ssh_command(&ssh_config, &remote_command, secret.as_deref())?;
+    let execution = execute_ssh_command(&ssh_config, app_data_dir, &remote_command, secret.as_deref())?;
     let target_host = ssh_config.render_target();
     let safe_stdout = sanitize_and_mask_text(&execution.stdout);
     let health_summary = parse_health_summary(&input.command_preset, &target_host, &safe_stdout);
@@ -452,22 +457,21 @@ struct SshExecution {
 
 fn execute_ssh_command(
     config: &SshConfig,
+    app_data_dir: &str,
     remote_command: &str,
     secret: Option<&str>,
 ) -> Result<SshExecution, String> {
     if !is_valid_remote_command(remote_command) {
         return Err("Remote command is not in the approved whitelist.".to_string());
     }
-    if config.auth_mode == "password" {
-        return Err(
-            "SSH profiles using password auth are not supported yet. Configure authMode=agent or authMode=key in Extra JSON."
-                .to_string(),
-        );
-    }
 
     let ssh_binary = "ssh";
     let mut command = Command::new(ssh_binary);
-    command.arg("-o").arg("BatchMode=yes");
+    command.arg("-o").arg(if config.auth_mode == "password" {
+        "BatchMode=no"
+    } else {
+        "BatchMode=yes"
+    });
     command.arg("-o").arg("ConnectTimeout=5");
     if config.strict_host_key_checking {
         command.arg("-o").arg("StrictHostKeyChecking=yes");
@@ -487,9 +491,31 @@ fn execute_ssh_command(
         }
         command.arg("-i").arg(private_key_path);
     }
-    if let Some(passphrase) = secret {
-        if !passphrase.trim().is_empty() {
-            command.arg("-o").arg("PreferredAuthentications=publickey");
+    let askpass_helper = if config.auth_mode == "password" {
+        let password = secret
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| "SSH password auth requires a stored secret.".to_string())?;
+        command.arg("-o").arg("PreferredAuthentications=password,keyboard-interactive");
+        command.arg("-o").arg("PubkeyAuthentication=no");
+        command.arg("-o").arg("NumberOfPasswordPrompts=1");
+        Some(TempAskpassHelper::new(app_data_dir, password)?)
+    } else {
+        if let Some(passphrase) = secret {
+            if !passphrase.trim().is_empty() {
+                command.arg("-o").arg("PreferredAuthentications=publickey");
+            }
+        }
+        None
+    };
+
+    if let Some(helper) = &askpass_helper {
+        command.env("SSH_ASKPASS", &helper.path);
+        command.env("SSH_ASKPASS_REQUIRE", "force");
+        command.env("ADBCH_SSH_PASSWORD", &helper.password);
+        if cfg!(target_os = "windows") {
+            command.env("DISPLAY", "adbchelper");
+        } else {
+            command.env("DISPLAY", ":0");
         }
     }
 
@@ -502,6 +528,14 @@ fn execute_ssh_command(
         let stderr = sanitize_and_mask_text(String::from_utf8_lossy(&output.stderr).trim());
         return Err(if stderr.is_empty() {
             format!("SSH command failed with status {}.", output.status)
+        } else if stderr.contains("Host key verification failed")
+            || stderr.contains("No ECDSA host key is known")
+            || stderr.contains("REMOTE HOST IDENTIFICATION HAS CHANGED")
+        {
+            format!(
+                "SSH host key verification failed for {}. Trust the host key first, or disable Strict host key checking in Settings for this SSH profile if that fits your environment. Original error: {stderr}",
+                config.render_target()
+            )
         } else {
             format!("SSH command failed: {stderr}")
         });
@@ -510,6 +544,43 @@ fn execute_ssh_command(
     Ok(SshExecution {
         stdout: sanitize_and_mask_text(&String::from_utf8_lossy(&output.stdout)),
     })
+}
+
+struct TempAskpassHelper {
+    path: PathBuf,
+    password: String,
+}
+
+impl TempAskpassHelper {
+    fn new(app_data_dir: &str, password: &str) -> Result<Self, String> {
+        let dir = Path::new(app_data_dir).join("runtime");
+        fs::create_dir_all(&dir).map_err(|error| format!("Failed to prepare SSH runtime directory: {error}"))?;
+        let path = if cfg!(target_os = "windows") {
+            dir.join("ssh-askpass.cmd")
+        } else {
+            dir.join("ssh-askpass.sh")
+        };
+        let content = if cfg!(target_os = "windows") {
+            "@echo off\r\necho %ADBCH_SSH_PASSWORD%\r\n".to_string()
+        } else {
+            "#!/bin/sh\nprintf '%s\\n' \"$ADBCH_SSH_PASSWORD\"\n".to_string()
+        };
+        fs::write(&path, content).map_err(|error| format!("Failed to write SSH askpass helper: {error}"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&path)
+                .map_err(|error| format!("Failed to inspect SSH askpass helper: {error}"))?
+                .permissions();
+            permissions.set_mode(0o700);
+            fs::set_permissions(&path, permissions)
+                .map_err(|error| format!("Failed to chmod SSH askpass helper: {error}"))?;
+        }
+        Ok(Self {
+            path,
+            password: password.to_string(),
+        })
+    }
 }
 
 fn is_valid_remote_command(command: &str) -> bool {

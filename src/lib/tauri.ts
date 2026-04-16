@@ -95,6 +95,10 @@ export async function deleteConnectionProfile(profileId: string): Promise<void> 
   return invoke("delete_connection_profile", { profileId });
 }
 
+export async function trustSshHostKey(profileId: string): Promise<string> {
+  return invoke<string>("trust_ssh_host_key", { profileId });
+}
+
 export async function listChatSessions(): Promise<ChatSession[]> {
   return invoke<ChatSession[]>("list_chat_sessions");
 }

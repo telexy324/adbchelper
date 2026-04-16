@@ -20,6 +20,7 @@ import {
   listConnectionProfiles,
   saveConnectionProfile,
   saveEnvironment,
+  trustSshHostKey,
   validateConnectionProfile,
 } from "../../lib/tauri";
 
@@ -55,6 +56,8 @@ type ProfileFormState = {
   sshPort: string;
   sshAuthMode: "password" | "key" | "agent";
   sshPrivateKeyPath: string;
+  sshStrictHostKeyChecking: boolean;
+  sshKnownHostsPath: string;
   elkIndexPattern: string;
   elkSpace: string;
   nacosNamespaceId: string;
@@ -86,6 +89,8 @@ const emptyProfile = (): ProfileFormState => ({
   sshPort: "22",
   sshAuthMode: "password",
   sshPrivateKeyPath: "",
+  sshStrictHostKeyChecking: true,
+  sshKnownHostsPath: "",
   elkIndexPattern: "",
   elkSpace: "",
   nacosNamespaceId: "",
@@ -232,6 +237,19 @@ export function SettingsPage({
       setStatusMessage("Connection profile deleted.");
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : "Failed to delete profile.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleTrustSshHostKey(profile: ConnectionProfile) {
+    setIsSaving(true);
+    setStatusMessage(null);
+    try {
+      const message = await trustSshHostKey(profile.id);
+      setStatusMessage(message);
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Failed to trust SSH host key.");
     } finally {
       setIsSaving(false);
     }
@@ -562,6 +580,14 @@ export function SettingsPage({
                           <div className="mt-3">
                             <div className="flex flex-wrap gap-2">
                               <Button
+                                onClick={() => void handleTrustSshHostKey(profile)}
+                                size="sm"
+                                variant="secondary"
+                                disabled={profile.profileType !== "ssh" || isSaving}
+                              >
+                                Trust Host Key
+                              </Button>
+                              <Button
                                 onClick={() => handleEditProfile(profile)}
                                 size="sm"
                                 variant="outline"
@@ -662,6 +688,8 @@ function composeStructuredConfig(draft: ProfileFormState): Record<string, unknow
         port: toNumberOrUndefined(draft.sshPort),
         authMode: draft.sshAuthMode,
         privateKeyPath: draft.sshPrivateKeyPath.trim() || undefined,
+        strictHostKeyChecking: draft.sshStrictHostKeyChecking,
+        knownHostsPath: draft.sshKnownHostsPath.trim() || undefined,
       };
     case "elk":
       return {
@@ -896,6 +924,25 @@ function renderTypeSpecificFields(
               />
             </Field>
           ) : null}
+          <ToggleField
+            checked={profileDraft.sshStrictHostKeyChecking}
+            label="Strict host key checking"
+            onChange={(checked) =>
+              setProfileDraft((current) => ({ ...current, sshStrictHostKeyChecking: checked }))
+            }
+          />
+          <Field label="Known hosts path">
+            <Input
+              placeholder={profileDraft.sshStrictHostKeyChecking ? "~/.ssh/known_hosts" : "Optional override"}
+              value={profileDraft.sshKnownHostsPath}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, sshKnownHostsPath: event.target.value }))
+              }
+            />
+            <p className="text-xs leading-5 text-muted-foreground">
+              Use this when the target host key is stored in a custom known_hosts file.
+            </p>
+          </Field>
         </>
       );
     case "nacos":
@@ -1088,6 +1135,9 @@ function profileToDraft(profile: ConnectionProfile): ProfileFormState {
     sshPort: stringValue(rawConfig.port) || "22",
     sshAuthMode: sshAuthModeValue(rawConfig.authMode),
     sshPrivateKeyPath: stringValue(rawConfig.privateKeyPath),
+    sshStrictHostKeyChecking:
+      rawConfig.strictHostKeyChecking === undefined ? true : booleanValue(rawConfig.strictHostKeyChecking),
+    sshKnownHostsPath: stringValue(rawConfig.knownHostsPath),
     elkIndexPattern: stringValue(rawConfig.indexPattern),
     elkSpace: stringValue(rawConfig.space),
     nacosNamespaceId: stringValue(rawConfig.namespaceId),

@@ -16,7 +16,7 @@ pub fn run_ssh_diagnostics(
     input: SshDiagnosticsInput,
 ) -> Result<SshDiagnosticsResponse, String> {
     let connection = open_connection(&state.storage_path)?;
-    let response = ssh::run_diagnostics(&connection, input)?;
+    let response = ssh::run_diagnostics(&connection, &state.app_data_dir, input)?;
 
     db::insert_audit_log(
         &connection,
