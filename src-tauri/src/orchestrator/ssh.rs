@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 use std::{fs, path::PathBuf};
 
@@ -12,6 +11,7 @@ use crate::models::ssh::{
     SshDiagnosticsInput, SshDiagnosticsResponse, SshHealthMetric, SshLogLine,
 };
 use crate::hardening::{run_command_with_timeout, sanitize_and_mask_text};
+use crate::orchestrator::ssh_tools::{prepare_private_key_for_ssh, resolve_ssh, SshToolLocator};
 use crate::storage::{db, secrets};
 
 const COMMAND_PRESETS: [(&str, &str); 4] = [
@@ -30,6 +30,8 @@ const COMMAND_PRESETS: [(&str, &str); 4] = [
 pub fn run_diagnostics(
     connection: &Connection,
     app_data_dir: &str,
+    resource_dir: Option<&Path>,
+    executable_dir: Option<&Path>,
     input: SshDiagnosticsInput,
 ) -> Result<SshDiagnosticsResponse, String> {
     let profile = resolve_ssh_profile(connection, &input.environment_id)?;
@@ -43,7 +45,14 @@ pub fn run_diagnostics(
         None
     };
     let remote_command = resolve_command(&input.command_preset, input.log_path.as_deref())?;
-    let execution = execute_ssh_command(&ssh_config, app_data_dir, &remote_command, secret.as_deref())?;
+    let execution = execute_ssh_command(
+        &ssh_config,
+        app_data_dir,
+        resource_dir,
+        executable_dir,
+        &remote_command,
+        secret.as_deref(),
+    )?;
     let target_host = ssh_config.render_target();
     let safe_stdout = sanitize_and_mask_text(&execution.stdout);
     let health_summary = parse_health_summary(&input.command_preset, &target_host, &safe_stdout);
@@ -379,6 +388,7 @@ struct SshConfig {
     username: Option<String>,
     private_key_path: Option<String>,
     auth_mode: String,
+    ssh_path: Option<String>,
     strict_host_key_checking: bool,
     known_hosts_path: Option<String>,
 }
@@ -421,6 +431,12 @@ impl SshConfig {
             .filter(|value| !value.is_empty())
             .unwrap_or(if private_key_path.is_some() { "rsa" } else { "agent" })
             .to_string();
+        let ssh_path = config
+            .get("sshPath")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
         let known_hosts_path = config
             .get("knownHostsPath")
             .and_then(Value::as_str)
@@ -438,6 +454,7 @@ impl SshConfig {
             username: profile.username.clone().filter(|value| !value.trim().is_empty()),
             private_key_path,
             auth_mode,
+            ssh_path,
             strict_host_key_checking,
             known_hosts_path,
         })
@@ -458,6 +475,8 @@ struct SshExecution {
 fn execute_ssh_command(
     config: &SshConfig,
     app_data_dir: &str,
+    resource_dir: Option<&Path>,
+    executable_dir: Option<&Path>,
     remote_command: &str,
     secret: Option<&str>,
 ) -> Result<SshExecution, String> {
@@ -465,8 +484,15 @@ fn execute_ssh_command(
         return Err("Remote command is not in the approved whitelist.".to_string());
     }
 
-    let ssh_binary = "ssh";
-    let mut command = Command::new(ssh_binary);
+    let ssh = resolve_ssh(
+        SshToolLocator {
+            resource_dir,
+            executable_dir,
+        },
+        config.ssh_path.as_deref(),
+    )?;
+    let ssh_source = ssh.source_label.clone();
+    let mut command = ssh.command();
     command.arg("-o").arg(if config.auth_mode == "password" {
         "BatchMode=no"
     } else {
@@ -486,10 +512,8 @@ fn execute_ssh_command(
         command.arg("-p").arg(port.to_string());
     }
     if let Some(private_key_path) = &config.private_key_path {
-        if !Path::new(private_key_path).exists() {
-            return Err(format!("Configured privateKeyPath does not exist: {private_key_path}"));
-        }
-        command.arg("-i").arg(private_key_path);
+        let staged_key = prepare_private_key_for_ssh(private_key_path, Path::new(app_data_dir))?;
+        command.arg("-i").arg(staged_key);
     }
     let askpass_helper = if config.auth_mode == "password" {
         let password = secret
@@ -522,7 +546,8 @@ fn execute_ssh_command(
     command.arg(config.render_target());
     command.arg(remote_command);
 
-    let output = run_command_with_timeout(&mut command, Duration::from_secs(8), "ssh diagnostics")?;
+    let label = format!("ssh diagnostics using {} ({ssh_source})", ssh.display_path());
+    let output = run_command_with_timeout(&mut command, Duration::from_secs(8), &label)?;
 
     if !output.status.success() {
         let stderr = sanitize_and_mask_text(String::from_utf8_lossy(&output.stderr).trim());

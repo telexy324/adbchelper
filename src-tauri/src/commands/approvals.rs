@@ -9,6 +9,7 @@ use tauri::State;
 use crate::hardening::{run_command_with_timeout, sanitize_and_mask_text};
 use crate::models::approval::{ApprovalRequest, CreateApprovalInput, ExecuteApprovalInput};
 use crate::orchestrator::kubectl::{resolve_kubectl, KubectlLocator};
+use crate::orchestrator::ssh_tools::{prepare_private_key_for_ssh, resolve_ssh, SshToolLocator};
 use crate::storage::db;
 use crate::AppState;
 
@@ -121,6 +122,7 @@ pub fn execute_approval_request(
         &connection,
         &approval,
         &target_details,
+        Some(Path::new(&state.app_data_dir)),
         Some(Path::new(&state.resource_dir)),
         Some(Path::new(&state.executable_dir)),
     )?;
@@ -171,6 +173,7 @@ fn execute_action(
     connection: &Connection,
     approval: &ApprovalRequest,
     target_details: &Value,
+    app_data_dir: Option<&Path>,
     resource_dir: Option<&Path>,
     executable_dir: Option<&Path>,
 ) -> Result<String, String> {
@@ -179,7 +182,7 @@ fn execute_action(
         "scale_deployment" => {
             execute_scale_deployment(connection, approval, target_details, resource_dir, executable_dir)
         }
-        "reload_nginx" => execute_reload_nginx(connection, approval, target_details),
+        "reload_nginx" => execute_reload_nginx(connection, approval, target_details, app_data_dir, resource_dir, executable_dir),
         other => Err(format!("Unsupported approval action: {other}")),
     }
 }
@@ -273,12 +276,22 @@ fn execute_reload_nginx(
     connection: &Connection,
     approval: &ApprovalRequest,
     target_details: &Value,
+    app_data_dir: Option<&Path>,
+    resource_dir: Option<&Path>,
+    executable_dir: Option<&Path>,
 ) -> Result<String, String> {
     let profile = resolve_profile(connection, &approval.environment_id, "ssh")?;
     let ssh = SshExecConfig::from_profile(&profile, target_details.get("host").and_then(Value::as_str))?;
 
-    let mut command = Command::new("ssh");
-    ssh.apply(&mut command)?;
+    let resolved = resolve_ssh(
+        SshToolLocator {
+            resource_dir,
+            executable_dir,
+        },
+        ssh.ssh_path.as_deref(),
+    )?;
+    let mut command = resolved.command();
+    ssh.apply(&mut command, app_data_dir)?;
     command.arg(ssh.render_target());
     command.arg("nginx -s reload || systemctl reload nginx || sudo systemctl reload nginx");
     let output = run_command_with_timeout(&mut command, Duration::from_secs(10), "ssh reload nginx")?;
@@ -360,6 +373,7 @@ struct SshExecConfig {
     port: Option<u16>,
     username: Option<String>,
     private_key_path: Option<String>,
+    ssh_path: Option<String>,
 }
 
 impl SshExecConfig {
@@ -386,20 +400,28 @@ impl SshExecConfig {
                 .get("privateKeyPath")
                 .and_then(Value::as_str)
                 .map(str::to_string),
+            ssh_path: config
+                .get("sshPath")
+                .and_then(Value::as_str)
+                .map(str::to_string),
         })
     }
 
-    fn apply(&self, command: &mut Command) -> Result<(), String> {
+    fn apply(&self, command: &mut Command, app_data_dir: Option<&Path>) -> Result<(), String> {
         command.arg("-o").arg("BatchMode=yes");
         command.arg("-o").arg("ConnectTimeout=5");
         if let Some(port) = self.port {
             command.arg("-p").arg(port.to_string());
         }
         if let Some(private_key_path) = &self.private_key_path {
-            if !Path::new(private_key_path).exists() {
+            let key_path = if let Some(app_data_dir) = app_data_dir {
+                prepare_private_key_for_ssh(private_key_path, app_data_dir)?
+            } else if !Path::new(private_key_path).exists() {
                 return Err(format!("Configured privateKeyPath does not exist: {private_key_path}"));
-            }
-            command.arg("-i").arg(private_key_path);
+            } else {
+                Path::new(private_key_path).to_path_buf()
+            };
+            command.arg("-i").arg(key_path);
         }
         Ok(())
     }

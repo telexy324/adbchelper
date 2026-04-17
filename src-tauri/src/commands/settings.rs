@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
 use rusqlite::Connection;
@@ -14,6 +13,7 @@ use crate::models::connection_profile::{
 };
 use crate::models::environment::EnvironmentProfile;
 use crate::models::ssh::SshKeyPairResult;
+use crate::orchestrator::ssh_tools::{resolve_ssh, resolve_ssh_keygen, resolve_ssh_keyscan, SshToolLocator};
 use crate::storage::db;
 use crate::storage::secrets;
 use crate::AppState;
@@ -134,8 +134,8 @@ pub fn trust_ssh_host_key(
     }
 
     let ssh_config = TrustedSshProfile::from_profile(&profile, Path::new(&state.app_data_dir))?;
-    if trust_with_keyscan(&ssh_config).is_err() {
-        trust_with_accept_new(&ssh_config)?;
+    if trust_with_keyscan(&state, &ssh_config).is_err() {
+        trust_with_accept_new(&state, &ssh_config)?;
     }
 
     Ok(format!(
@@ -166,7 +166,7 @@ pub fn prepare_ssh_rsa_keypair(
     let created = if private_key_path.exists() && public_key_path.exists() {
         false
     } else {
-        generate_rsa_keypair(&private_key_path, &profile.name)?;
+        generate_rsa_keypair(&state, &profile, &private_key_path, &profile.name)?;
         true
     };
 
@@ -193,6 +193,7 @@ struct TrustedSshProfile {
     host: String,
     port: Option<u16>,
     username: Option<String>,
+    ssh_path: Option<String>,
     known_hosts_path: PathBuf,
 }
 
@@ -221,6 +222,12 @@ impl TrustedSshProfile {
             .and_then(Value::as_u64)
             .and_then(|value| u16::try_from(value).ok())
             .or(endpoint_port);
+        let ssh_path = config
+            .get("sshPath")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
         let known_hosts_path = resolve_known_hosts_path(
             config
                 .get("knownHostsPath")
@@ -234,6 +241,7 @@ impl TrustedSshProfile {
             host,
             port,
             username: profile.username.clone().filter(|value| !value.trim().is_empty()),
+            ssh_path,
             known_hosts_path,
         })
     }
@@ -246,14 +254,21 @@ impl TrustedSshProfile {
     }
 }
 
-fn trust_with_keyscan(profile: &TrustedSshProfile) -> Result<(), String> {
+fn trust_with_keyscan(state: &AppState, profile: &TrustedSshProfile) -> Result<(), String> {
     let parent = profile
         .known_hosts_path
         .parent()
         .ok_or_else(|| "Known hosts path is invalid.".to_string())?;
     fs::create_dir_all(parent).map_err(|error| format!("Failed to prepare known_hosts directory: {error}"))?;
 
-    let mut command = Command::new("ssh-keyscan");
+    let keyscan = resolve_ssh_keyscan(
+        SshToolLocator {
+            resource_dir: Some(Path::new(&state.resource_dir)),
+            executable_dir: Some(Path::new(&state.executable_dir)),
+        },
+        profile.ssh_path.as_deref(),
+    )?;
+    let mut command = keyscan.command();
     if let Some(port) = profile.port {
         command.arg("-p").arg(port.to_string());
     }
@@ -277,7 +292,7 @@ fn trust_with_keyscan(profile: &TrustedSshProfile) -> Result<(), String> {
     append_unique_known_hosts_entries(&profile.known_hosts_path, &scan_output)
 }
 
-fn trust_with_accept_new(profile: &TrustedSshProfile) -> Result<(), String> {
+fn trust_with_accept_new(state: &AppState, profile: &TrustedSshProfile) -> Result<(), String> {
     let parent = profile
         .known_hosts_path
         .parent()
@@ -285,7 +300,14 @@ fn trust_with_accept_new(profile: &TrustedSshProfile) -> Result<(), String> {
     fs::create_dir_all(parent).map_err(|error| format!("Failed to prepare known_hosts directory: {error}"))?;
     let before = fs::read_to_string(&profile.known_hosts_path).unwrap_or_default();
 
-    let mut command = Command::new("ssh");
+    let ssh = resolve_ssh(
+        SshToolLocator {
+            resource_dir: Some(Path::new(&state.resource_dir)),
+            executable_dir: Some(Path::new(&state.executable_dir)),
+        },
+        profile.ssh_path.as_deref(),
+    )?;
+    let mut command = ssh.command();
     command.arg("-o").arg("BatchMode=yes");
     command.arg("-o").arg("PreferredAuthentications=none");
     command.arg("-o").arg("PubkeyAuthentication=no");
@@ -390,8 +412,22 @@ fn parse_host_and_port(endpoint: &str) -> Result<(String, Option<u16>), String> 
     Ok((endpoint.to_string(), None))
 }
 
-fn generate_rsa_keypair(private_key_path: &Path, profile_name: &str) -> Result<(), String> {
-    let mut command = Command::new("ssh-keygen");
+fn generate_rsa_keypair(
+    state: &AppState,
+    profile: &ConnectionProfile,
+    private_key_path: &Path,
+    profile_name: &str,
+) -> Result<(), String> {
+    let config = serde_json::from_str::<Value>(&profile.config_json)
+        .unwrap_or_else(|_| Value::Object(Default::default()));
+    let keygen = resolve_ssh_keygen(
+        SshToolLocator {
+            resource_dir: Some(Path::new(&state.resource_dir)),
+            executable_dir: Some(Path::new(&state.executable_dir)),
+        },
+        config.get("sshPath").and_then(Value::as_str),
+    )?;
+    let mut command = keygen.command();
     command.arg("-q");
     command.arg("-t").arg("rsa");
     command.arg("-b").arg("4096");

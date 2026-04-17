@@ -57,6 +57,7 @@ type ProfileFormState = {
   sshHost: string;
   sshPort: string;
   sshAuthMode: "password" | "key" | "rsa" | "agent";
+  sshPath: string;
   sshPrivateKeyPath: string;
   sshPublicKeyPath: string;
   sshPublicKey: string;
@@ -92,6 +93,7 @@ const emptyProfile = (): ProfileFormState => ({
   sshHost: "",
   sshPort: "22",
   sshAuthMode: "password",
+  sshPath: "",
   sshPrivateKeyPath: "",
   sshPublicKeyPath: "",
   sshPublicKey: "",
@@ -749,6 +751,7 @@ function composeStructuredConfig(draft: ProfileFormState): Record<string, unknow
         host: draft.sshHost.trim() || undefined,
         port: toNumberOrUndefined(draft.sshPort),
         authMode: draft.sshAuthMode,
+        sshPath: draft.sshPath.trim() || undefined,
         privateKeyPath: draft.sshPrivateKeyPath.trim() || undefined,
         publicKeyPath: draft.sshPublicKeyPath.trim() || undefined,
         strictHostKeyChecking: draft.sshStrictHostKeyChecking,
@@ -975,6 +978,18 @@ function renderTypeSpecificFields(
               <option value="rsa">rsa key pair</option>
               <option value="agent">ssh agent</option>
             </select>
+          </Field>
+          <Field label="Custom ssh path">
+            <Input
+              placeholder="C:\\Windows\\System32\\OpenSSH\\ssh.exe"
+              value={profileDraft.sshPath}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, sshPath: event.target.value }))
+              }
+            />
+            <p className="text-xs leading-5 text-muted-foreground">
+              Optional. The app checks this path first, then bundled `tools/ssh.exe`, then the system SSH client.
+            </p>
           </Field>
           {profileDraft.sshAuthMode === "rsa" || profileDraft.sshAuthMode === "key" ? (
             <>
@@ -1221,6 +1236,7 @@ function profileToDraft(profile: ConnectionProfile, sshPublicKey = ""): ProfileF
     sshHost: stringValue(rawConfig.host) || profile.endpoint,
     sshPort: stringValue(rawConfig.port) || "22",
     sshAuthMode: sshAuthModeValue(rawConfig.authMode),
+    sshPath: stringValue(rawConfig.sshPath),
     sshPrivateKeyPath: stringValue(rawConfig.privateKeyPath),
     sshPublicKeyPath: stringValue(rawConfig.publicKeyPath),
     sshPublicKey,
