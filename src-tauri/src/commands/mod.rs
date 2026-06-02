@@ -8,3 +8,4 @@ pub mod nacos;
 pub mod redis;
 pub mod ssh;
 pub mod settings;
+pub mod tidb;

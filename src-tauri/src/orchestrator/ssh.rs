@@ -44,7 +44,12 @@ pub fn run_diagnostics(
     } else {
         None
     };
-    let remote_command = resolve_command(&input.command_preset, input.log_path.as_deref())?;
+    let remote_command = resolve_command(
+        &input.command_preset,
+        input.log_path.as_deref(),
+        input.tail_lines,
+        input.custom_command.as_deref(),
+    )?;
     let execution = execute_ssh_command(
         &ssh_config,
         app_data_dir,
@@ -82,10 +87,16 @@ fn resolve_ssh_profile(connection: &Connection, environment_id: &str) -> Result<
         .ok_or_else(|| "No SSH profile found for this environment. Add one in Settings first.".to_string())
 }
 
-fn resolve_command(command_preset: &str, log_path: Option<&str>) -> Result<String, String> {
+fn resolve_command(
+    command_preset: &str,
+    log_path: Option<&str>,
+    tail_lines: Option<u32>,
+    custom_command: Option<&str>,
+) -> Result<String, String> {
+    let safe_tail_lines = sanitize_tail_lines(tail_lines)?;
     match command_preset {
         "tail_app_log" => Ok(format!(
-            "tail -n 80 {}",
+            "tail -n {safe_tail_lines} {}",
             sanitize_remote_log_path(
                 log_path
                 .filter(|value| !value.trim().is_empty())
@@ -93,13 +104,26 @@ fn resolve_command(command_preset: &str, log_path: Option<&str>) -> Result<Strin
             )?
         )),
         "tail_nginx_error" => Ok(format!(
-            "tail -n 80 {}",
+            "tail -n {safe_tail_lines} {}",
             sanitize_remote_log_path(
                 log_path
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or("/var/log/nginx/error.log")
             )?
         )),
+        "tail_custom_log" => Ok(format!(
+            "tail -n {safe_tail_lines} {}",
+            sanitize_remote_log_path(
+                log_path
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or_else(|| "Custom log mode requires a log path.".to_string())?
+            )?
+        )),
+        "custom_shell" => sanitize_custom_shell_command(
+            custom_command
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| "Custom shell mode requires a command.".to_string())?,
+        ),
         other => COMMAND_PRESETS
             .iter()
             .find(|(name, _)| *name == other)
@@ -118,7 +142,8 @@ fn allowed_commands() -> Vec<String> {
 fn parse_health_summary(command_preset: &str, target_host: &str, stdout: &str) -> Vec<SshHealthMetric> {
     match command_preset {
         "check_process_ports" => parse_process_metrics(stdout),
-        "tail_app_log" | "tail_nginx_error" => parse_log_health_metrics(stdout),
+        "tail_app_log" | "tail_nginx_error" | "tail_custom_log" => parse_log_health_metrics(stdout),
+        "custom_shell" => parse_custom_command_metrics(stdout),
         _ => parse_system_metrics(target_host, stdout),
     }
 }
@@ -127,8 +152,10 @@ fn parse_log_lines(command_preset: &str, stdout: &str) -> Vec<SshLogLine> {
     let now = Utc::now();
     let source = match command_preset {
         "tail_nginx_error" => "nginx/error.log",
+        "tail_custom_log" => "custom.log",
         "check_process_ports" => "process-audit",
         "system_overview" => "host-metrics",
+        "custom_shell" => "custom-shell",
         _ => "application.log",
     };
 
@@ -159,6 +186,9 @@ fn build_recommendations(command_preset: &str, health_summary: &[SshHealthMetric
 
     if command_preset == "tail_nginx_error" {
         actions.push("Correlate Nginx upstream failures with application listener health and recent deploy activity.".to_string());
+    }
+    if command_preset == "custom_shell" {
+        actions.push("Validate custom command output carefully before using it as incident evidence or remediation input.".to_string());
     }
 
     actions
@@ -298,6 +328,38 @@ fn parse_log_health_metrics(stdout: &str) -> Vec<SshHealthMetric> {
     ]
 }
 
+fn parse_custom_command_metrics(stdout: &str) -> Vec<SshHealthMetric> {
+    let line_count = stdout.lines().filter(|line| !line.trim().is_empty()).count();
+    let error_count = stdout.lines().filter(|line| detect_level(line) == "ERROR").count();
+
+    vec![
+        SshHealthMetric {
+            label: "CPU".to_string(),
+            status: "healthy".to_string(),
+            value: "n/a".to_string(),
+            detail: "Custom commands do not automatically sample CPU.".to_string(),
+        },
+        SshHealthMetric {
+            label: "Memory".to_string(),
+            status: "healthy".to_string(),
+            value: "n/a".to_string(),
+            detail: "Custom commands do not automatically sample memory.".to_string(),
+        },
+        SshHealthMetric {
+            label: "Disk".to_string(),
+            status: "healthy".to_string(),
+            value: "n/a".to_string(),
+            detail: "Custom commands do not automatically sample disk.".to_string(),
+        },
+        SshHealthMetric {
+            label: "Output".to_string(),
+            status: if error_count > 0 { "warning" } else { "healthy" }.to_string(),
+            value: format!("{line_count} line(s) returned"),
+            detail: "Derived from the custom shell output captured by the app.".to_string(),
+        },
+    ]
+}
+
 fn extract_after_marker<'a>(stdout: &'a str, start: &str, end: &str) -> Option<&'a str> {
     let (_, after_start) = stdout.split_once(start)?;
     let section = after_start.trim_start_matches('\n');
@@ -369,6 +431,59 @@ fn sanitize_remote_log_path(path: &str) -> Result<String, String> {
         Ok(trimmed.to_string())
     } else {
         Err("SSH log path contains unsupported characters.".to_string())
+    }
+}
+
+fn sanitize_tail_lines(tail_lines: Option<u32>) -> Result<u32, String> {
+    let value = tail_lines.unwrap_or(80);
+    if value == 0 {
+        return Err("SSH tail lines must be greater than 0.".to_string());
+    }
+    if value > 2000 {
+        return Err("SSH tail lines must be 2000 or fewer.".to_string());
+    }
+    Ok(value)
+}
+
+fn sanitize_custom_shell_command(command: &str) -> Result<String, String> {
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        return Err("Custom SSH command cannot be empty.".to_string());
+    }
+    if trimmed.len() > 400 {
+        return Err("Custom SSH command is too long. Keep it under 400 characters.".to_string());
+    }
+    let lowered = trimmed.to_ascii_lowercase();
+    for blocked in [
+        "rm -",
+        "shutdown",
+        "reboot",
+        "halt",
+        "poweroff",
+        "mkfs",
+        "dd ",
+        "chmod 777",
+        "chown -r",
+        "sudo ",
+        "systemctl stop",
+        "systemctl restart",
+        "kill -9",
+        ">",
+        ">>",
+    ] {
+        if lowered.contains(blocked) {
+            return Err(format!(
+                "Custom SSH command contains a blocked pattern: {blocked}. Use the approval flow for risky actions."
+            ));
+        }
+    }
+    if trimmed
+        .chars()
+        .all(|char| char.is_ascii() && (!char.is_control() || matches!(char, '\t' | '\n' | '\r')))
+    {
+        Ok(trimmed.to_string())
+    } else {
+        Err("Custom SSH command contains unsupported characters.".to_string())
     }
 }
 

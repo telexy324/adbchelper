@@ -48,6 +48,11 @@ pub fn tool_catalog() -> Vec<ToolDefinition> {
             description: "Review Redis INFO health, slowlog, latency trends, and Redis log warnings.".to_string(),
             input_hint: "{ environment, instanceName?, timeRange }".to_string(),
         },
+        ToolDefinition {
+            name: "analyze_tidb_slow_queries".to_string(),
+            description: "Collect TiDB slow SQL rows, summarize hot digests, and prepare them for LLM analysis.".to_string(),
+            input_hint: "{ environment, instanceName?, timeRange, slowQueryLimit? }".to_string(),
+        },
     ]
 }
 

@@ -9,6 +9,8 @@ pub struct SshDiagnosticsInput {
     pub host: Option<String>,
     pub command_preset: String,
     pub log_path: Option<String>,
+    pub tail_lines: Option<u32>,
+    pub custom_command: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

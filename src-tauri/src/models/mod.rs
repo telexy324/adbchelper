@@ -9,3 +9,4 @@ pub mod logs;
 pub mod nacos;
 pub mod redis;
 pub mod ssh;
+pub mod tidb;

@@ -6,3 +6,4 @@ pub mod nacos;
 pub mod redis;
 pub mod ssh;
 pub mod ssh_tools;
+pub mod tidb;

@@ -5,6 +5,7 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import {
   analyzeRedis,
+  analyzeTidb,
   attachToolEvidence,
   compareNacosConfig,
   listKubernetesEvents,
@@ -27,6 +28,8 @@ import type {
   LogTimeRange,
   AnalyzeRedisInput,
   AnalyzeRedisResponse,
+  AnalyzeTidbInput,
+  AnalyzeTidbResponse,
   SshCommandPreset,
   SshDiagnosticsInput,
   SshDiagnosticsResponse,
@@ -42,6 +45,8 @@ const sshCommandOptions: { value: SshCommandPreset; label: string }[] = [
   { value: "check_process_ports", label: "Process and ports" },
   { value: "tail_app_log", label: "Tail application log" },
   { value: "tail_nginx_error", label: "Tail Nginx error log" },
+  { value: "tail_custom_log", label: "Tail custom log file" },
+  { value: "custom_shell", label: "Custom shell command" },
 ];
 
 export function ResourcesPage({ environments }: ResourcesPageProps) {
@@ -60,6 +65,8 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
     host: "",
     commandPreset: "system_overview",
     logPath: "",
+    tailLines: 80,
+    customCommand: "",
   });
   const [kubernetesFilters, setKubernetesFilters] = useState<ListKubernetesEventsInput>({
     environmentId: defaultEnvironmentId,
@@ -79,11 +86,18 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
     instanceName: "",
     timeRange: "1h",
   });
+  const [tidbFilters, setTidbFilters] = useState<AnalyzeTidbInput>({
+    environmentId: defaultEnvironmentId,
+    instanceName: "",
+    timeRange: "1h",
+    slowQueryLimit: 20,
+  });
   const [logResults, setLogResults] = useState<LogSearchResponse | null>(null);
   const [sshResults, setSshResults] = useState<SshDiagnosticsResponse | null>(null);
   const [kubernetesResults, setKubernetesResults] = useState<ListKubernetesEventsResponse | null>(null);
   const [nacosResults, setNacosResults] = useState<CompareNacosConfigResponse | null>(null);
   const [redisResults, setRedisResults] = useState<AnalyzeRedisResponse | null>(null);
+  const [tidbResults, setTidbResults] = useState<AnalyzeTidbResponse | null>(null);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [investigations, setInvestigations] = useState<InvestigationSummary[]>([]);
   const [attachChatSessionId, setAttachChatSessionId] = useState<string>("new");
@@ -94,12 +108,14 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
   const [kubernetesStatusMessage, setKubernetesStatusMessage] = useState<string | null>(null);
   const [nacosStatusMessage, setNacosStatusMessage] = useState<string | null>(null);
   const [redisStatusMessage, setRedisStatusMessage] = useState<string | null>(null);
+  const [tidbStatusMessage, setTidbStatusMessage] = useState<string | null>(null);
   const [attachStatusMessage, setAttachStatusMessage] = useState<string | null>(null);
   const [isLogLoading, setIsLogLoading] = useState(false);
   const [isSshLoading, setIsSshLoading] = useState(false);
   const [isKubernetesLoading, setIsKubernetesLoading] = useState(false);
   const [isNacosLoading, setIsNacosLoading] = useState(false);
   const [isRedisLoading, setIsRedisLoading] = useState(false);
+  const [isTidbLoading, setIsTidbLoading] = useState(false);
   const [isAttachingChat, setIsAttachingChat] = useState(false);
   const [isAttachingInvestigation, setIsAttachingInvestigation] = useState(false);
 
@@ -130,6 +146,10 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
       ...current,
       environmentId: current.environmentId || environments[0].id,
     }));
+    setTidbFilters((current) => ({
+      ...current,
+      environmentId: current.environmentId || environments[0].id,
+    }));
   }, [environments]);
 
   useEffect(() => {
@@ -145,12 +165,14 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
       traceId: logFilters.traceId,
       timeRange: logFilters.timeRange,
     });
-    void runSsh({
-      environmentId: sshFilters.environmentId || environments[0].id,
-      host: sshFilters.host,
-      commandPreset: sshFilters.commandPreset,
-      logPath: sshFilters.logPath,
-    });
+      void runSsh({
+        environmentId: sshFilters.environmentId || environments[0].id,
+        host: sshFilters.host,
+        commandPreset: sshFilters.commandPreset,
+        logPath: sshFilters.logPath,
+        tailLines: sshFilters.tailLines,
+        customCommand: sshFilters.customCommand,
+      });
     void runKubernetesEvents({
       environmentId: kubernetesFilters.environmentId || environments[0].id,
       namespace: kubernetesFilters.namespace,
@@ -161,6 +183,12 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
       environmentId: redisFilters.environmentId || environments[0].id,
       instanceName: redisFilters.instanceName,
       timeRange: redisFilters.timeRange,
+    });
+    void runTidbAnalyze({
+      environmentId: tidbFilters.environmentId || environments[0].id,
+      instanceName: tidbFilters.instanceName,
+      timeRange: tidbFilters.timeRange,
+      slowQueryLimit: tidbFilters.slowQueryLimit,
     });
   }, []);
 
@@ -243,6 +271,22 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
       setRedisStatusMessage(error instanceof Error ? error.message : "Failed to analyze Redis.");
     } finally {
       setIsRedisLoading(false);
+    }
+  }
+
+  async function runTidbAnalyze(input: AnalyzeTidbInput) {
+    setIsTidbLoading(true);
+    setTidbStatusMessage(null);
+    try {
+      const response = await analyzeTidb(input);
+      setTidbResults(response);
+      setTidbStatusMessage(
+        `Loaded TiDB slow SQL analysis for ${response.instanceName} via ${response.adapterMode}.`,
+      );
+    } catch (error) {
+      setTidbStatusMessage(error instanceof Error ? error.message : "Failed to analyze TiDB.");
+    } finally {
+      setIsTidbLoading(false);
     }
   }
 
@@ -711,6 +755,155 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
       </SectionCard>
 
       <SectionCard
+        eyebrow="TiDB"
+        title="TiDB Slow SQL Workbench"
+        description="Connect to TiDB/MySQL-compatible endpoints, collect slow SQL rows, and package the hottest statements for investigation and LLM review."
+      >
+        <div className="grid gap-4 md:grid-cols-4">
+          <Field label="Environment">
+            <select
+              className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
+              value={tidbFilters.environmentId}
+              onChange={(event) => updateTidbFilter("environmentId", event.target.value)}
+            >
+              {environments.map((environment) => (
+                <option key={environment.id} value={environment.id}>
+                  {environment.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Instance name">
+            <Input
+              placeholder="tidb-prod-main"
+              value={tidbFilters.instanceName}
+              onChange={(event) => updateTidbFilter("instanceName", event.target.value)}
+            />
+          </Field>
+          <Field label="Time range">
+            <select
+              className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
+              value={tidbFilters.timeRange}
+              onChange={(event) => updateTidbFilter("timeRange", event.target.value as LogTimeRange)}
+            >
+              {timeRangeOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Slow query limit">
+            <Input
+              type="number"
+              min={1}
+              max={200}
+              value={tidbFilters.slowQueryLimit ?? 20}
+              onChange={(event) =>
+                updateTidbFilter("slowQueryLimit", Number(event.target.value || 20))
+              }
+            />
+          </Field>
+        </div>
+        <ActionRow
+          primaryLabel={isTidbLoading ? "Analyzing..." : "Analyze TiDB"}
+          onPrimary={() => void runTidbAnalyze(tidbFilters)}
+          primaryDisabled={isTidbLoading}
+          onReset={() => {
+            const nextFilters: AnalyzeTidbInput = {
+              environmentId: tidbFilters.environmentId || defaultEnvironmentId,
+              instanceName: "",
+              timeRange: "1h",
+              slowQueryLimit: 20,
+            };
+            setTidbFilters(nextFilters);
+            void runTidbAnalyze(nextFilters);
+          }}
+          resetLabel="Reset TiDB"
+        />
+        {tidbStatusMessage ? <p className="text-sm text-muted-foreground">{tidbStatusMessage}</p> : null}
+        {tidbResults ? (
+          <div className="space-y-4">
+            <ResultHeader
+              badges={[
+                { text: tidbResults.adapterMode, variant: "secondary" },
+                { text: tidbResults.instanceName, variant: "outline" },
+                { text: tidbResults.timeRange, variant: "outline" },
+              ]}
+              headline={tidbResults.summary.headline}
+              caption={`${tidbResults.executedPlan} · ${tidbResults.sourceRelation}`}
+            />
+            <div className="grid gap-4 lg:grid-cols-2">
+              <SimpleListCard title="Likely causes" items={tidbResults.summary.likelyCauses} />
+              <SimpleListCard
+                title="Recommended next steps"
+                items={tidbResults.summary.recommendedNextSteps}
+              />
+            </div>
+            <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
+              <p className="text-sm font-semibold">Slow SQL metrics</p>
+              <div className="grid gap-3 lg:grid-cols-2">
+                {tidbResults.metrics.map((metric) => (
+                  <article className="rounded-lg border bg-background/80 p-3" key={metric.label}>
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        variant={
+                          metric.status === "healthy"
+                            ? "success"
+                            : metric.status === "warning"
+                              ? "warning"
+                              : "danger"
+                        }
+                      >
+                        {metric.status}
+                      </Badge>
+                      <span className="text-sm font-semibold">{metric.label}</span>
+                      <span className="text-xs text-muted-foreground">{metric.value}</span>
+                    </div>
+                    <p className="mt-2 text-sm text-muted-foreground">{metric.detail}</p>
+                  </article>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
+              <p className="text-sm font-semibold">Slow SQL samples</p>
+              {tidbResults.slowQueries.map((query) => (
+                <article className="rounded-lg border bg-background/80 p-3" key={query.id}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="warning">{query.queryTimeSecs.toFixed(3)}s</Badge>
+                    <span className="text-xs text-muted-foreground">{query.databaseName}</span>
+                    <span className="text-xs text-muted-foreground">{query.user}</span>
+                    <span className="text-xs text-muted-foreground">{query.digest}</span>
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">{query.queryText}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {query.timestamp} · indexes {query.indexNames}
+                  </p>
+                </article>
+              ))}
+            </div>
+            <Button
+              onClick={() =>
+                void handleSaveEvidenceToInvestigation({
+                  environmentId: tidbResults.environmentId,
+                  evidenceType: "tidb_slow_sql",
+                  title: `TiDB slow SQL ${tidbResults.instanceName}`,
+                  summary: tidbResults.summary.headline,
+                  contentJson: JSON.stringify(tidbResults),
+                })
+              }
+              disabled={isAttachingInvestigation}
+            >
+              {isAttachingInvestigation ? "Saving..." : "Attach TiDB Analysis To Investigation"}
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              {describeInvestigationTarget(attachInvestigationId, investigationTitle, investigations, tidbResults.environmentId)}
+            </p>
+          </div>
+        ) : null}
+      </SectionCard>
+
+      <SectionCard
         eyebrow="Week 5"
         title="Log Analysis Workbench"
         description="Search logs, cluster repeated failures, and shape evidence for chat and investigations."
@@ -884,7 +1077,29 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
                 onChange={(event) => updateSshFilter("logPath", event.target.value)}
               />
             </Field>
+            <Field label="Tail lines">
+              <Input
+                placeholder="80"
+                type="number"
+                min={1}
+                max={2000}
+                value={sshFilters.tailLines ?? 80}
+                onChange={(event) =>
+                  updateSshFilter("tailLines", Number(event.target.value || 80))
+                }
+              />
+            </Field>
+            <Field label="Custom shell command">
+              <Input
+                placeholder="grep -i error /var/log/app/application.log | tail -n 50"
+                value={sshFilters.customCommand ?? ""}
+                onChange={(event) => updateSshFilter("customCommand", event.target.value)}
+              />
+            </Field>
           </div>
+          <p className="text-xs text-muted-foreground">
+            `Tail custom log file` uses the log path and tail lines fields. `Custom shell command` is for advanced read-focused commands and blocks obvious destructive patterns.
+          </p>
           <ActionRow
             primaryLabel={isSshLoading ? "Running..." : "Run Diagnostics"}
             onPrimary={() => void runSsh(sshFilters)}
@@ -895,6 +1110,8 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
                 host: "",
                 commandPreset: "system_overview",
                 logPath: "",
+                tailLines: 80,
+                customCommand: "",
               };
               setSshFilters(nextFilters);
               void runSsh(nextFilters);
@@ -1272,6 +1489,20 @@ export function ResourcesPage({ environments }: ResourcesPageProps) {
     setNacosFilters((current) => ({ ...current, [key]: value }));
   }
 
+  function updateRedisFilter<Key extends keyof AnalyzeRedisInput>(
+    key: Key,
+    value: AnalyzeRedisInput[Key],
+  ) {
+    setRedisFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateTidbFilter<Key extends keyof AnalyzeTidbInput>(
+    key: Key,
+    value: AnalyzeTidbInput[Key],
+  ) {
+    setTidbFilters((current) => ({ ...current, [key]: value }));
+  }
+
   function resolveInvestigationTarget(environmentId: string): { investigationId?: string; title?: string } | null {
     if (attachInvestigationId !== "new") {
       return { investigationId: attachInvestigationId };
@@ -1304,13 +1535,6 @@ function normalizeNacosInput(input: CompareNacosConfigInput): CompareNacosConfig
     group: input.group.trim(),
     namespaceId: input.namespaceId?.trim() || undefined,
   };
-}
-
-function updateRedisFilter<Key extends keyof AnalyzeRedisInput>(
-  key: Key,
-  value: AnalyzeRedisInput[Key],
-) {
-  // placeholder for patch context
 }
 
 function describeInvestigationTarget(

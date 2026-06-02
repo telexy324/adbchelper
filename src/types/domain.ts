@@ -37,7 +37,7 @@ export interface ExecuteApprovalInput {
 }
 
 export type EnvironmentKind = "dev" | "test" | "prod";
-export type ConnectionProfileType = "kubernetes" | "elk" | "ssh" | "nacos" | "redis" | "qwen";
+export type ConnectionProfileType = "kubernetes" | "elk" | "ssh" | "nacos" | "redis" | "tidb" | "qwen";
 
 export interface EnvironmentProfile {
   id: string;
@@ -195,13 +195,17 @@ export type SshCommandPreset =
   | "system_overview"
   | "check_process_ports"
   | "tail_app_log"
-  | "tail_nginx_error";
+  | "tail_nginx_error"
+  | "tail_custom_log"
+  | "custom_shell";
 
 export interface SshDiagnosticsInput {
   environmentId: string;
   host?: string;
   commandPreset: SshCommandPreset;
   logPath?: string;
+  tailLines?: number;
+  customCommand?: string;
 }
 
 export interface SshHealthMetric {
@@ -331,6 +335,49 @@ export interface AnalyzeRedisResponse {
   latencyPoints: RedisLatencyPoint[];
   logLines: RedisLogLine[];
   summary: RedisSummary;
+}
+
+export interface AnalyzeTidbInput {
+  environmentId: string;
+  instanceName?: string;
+  timeRange: LogTimeRange;
+  slowQueryLimit?: number;
+}
+
+export interface TidbSlowQuery {
+  id: string;
+  timestamp: string;
+  queryTimeSecs: number;
+  digest: string;
+  databaseName: string;
+  user: string;
+  indexNames: string;
+  queryText: string;
+}
+
+export interface TidbMetric {
+  label: string;
+  value: string;
+  status: string;
+  detail: string;
+}
+
+export interface TidbSummary {
+  headline: string;
+  likelyCauses: string[];
+  recommendedNextSteps: string[];
+}
+
+export interface AnalyzeTidbResponse {
+  environmentId: string;
+  instanceName: string;
+  timeRange: LogTimeRange;
+  adapterMode: string;
+  executedPlan: string;
+  sourceRelation: string;
+  metrics: TidbMetric[];
+  slowQueries: TidbSlowQuery[];
+  summary: TidbSummary;
 }
 
 export interface InvestigationSummary {

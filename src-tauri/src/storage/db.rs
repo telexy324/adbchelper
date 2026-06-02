@@ -472,7 +472,7 @@ pub fn validate_connection_profile(input: &UpsertConnectionProfileInput) -> Vali
         }
     }
 
-    if matches!(input.profile_type.as_str(), "elk" | "nacos" | "redis" | "qwen")
+    if matches!(input.profile_type.as_str(), "elk" | "nacos" | "redis" | "qwen" | "tidb")
         && input.endpoint.trim().is_empty()
     {
         messages.push("This profile type requires an endpoint or base URL.".to_string());
@@ -513,6 +513,26 @@ pub fn validate_connection_profile(input: &UpsertConnectionProfileInput) -> Vali
                 if let Some(api_version) = config.get("apiVersion").and_then(serde_json::Value::as_str) {
                     if !matches!(api_version, "v1" | "v2") {
                         messages.push("Nacos apiVersion must be either v1 or v2.".to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    if input.profile_type == "tidb" {
+        if input.username.as_ref().map(|value| value.trim().is_empty()).unwrap_or(true) {
+            messages.push("TiDB profiles should provide a username.".to_string());
+        }
+        if let Some(config_json) = &input.config_json {
+            if let Ok(config) = serde_json::from_str::<serde_json::Value>(config_json) {
+                if let Some(database) = config.get("database").and_then(serde_json::Value::as_str) {
+                    if database.trim().is_empty() {
+                        messages.push("TiDB database cannot be empty when provided.".to_string());
+                    }
+                }
+                if let Some(limit) = config.get("slowQueryLimit").and_then(serde_json::Value::as_u64) {
+                    if limit == 0 || limit > 200 {
+                        messages.push("TiDB slowQueryLimit must be between 1 and 200.".to_string());
                     }
                 }
             }

@@ -7,6 +7,8 @@ import type {
   AttachToolEvidenceInput,
   AnalyzeRedisInput,
   AnalyzeRedisResponse,
+  AnalyzeTidbInput,
+  AnalyzeTidbResponse,
   CompareNacosConfigInput,
   CompareNacosConfigResponse,
   ChatResponse,
@@ -176,4 +178,8 @@ export async function compareNacosConfig(
 
 export async function analyzeRedis(input: AnalyzeRedisInput): Promise<AnalyzeRedisResponse> {
   return invoke<AnalyzeRedisResponse>("analyze_redis", { input });
+}
+
+export async function analyzeTidb(input: AnalyzeTidbInput): Promise<AnalyzeTidbResponse> {
+  return invoke<AnalyzeTidbResponse>("analyze_tidb", { input });
 }

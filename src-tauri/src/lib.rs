@@ -95,6 +95,7 @@ pub fn run() {
             commands::nacos::compare_nacos_config,
             commands::redis::analyze_redis,
             commands::ssh::run_ssh_diagnostics,
+            commands::tidb::analyze_tidb,
             commands::settings::save_environment,
             commands::settings::list_connection_profiles,
             commands::settings::validate_connection_profile,

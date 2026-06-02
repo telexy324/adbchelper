@@ -38,6 +38,7 @@ const profileTypeOptions: ConnectionProfileType[] = [
   "ssh",
   "nacos",
   "redis",
+  "tidb",
   "qwen",
 ];
 
@@ -72,6 +73,8 @@ type ProfileFormState = {
   redisDatabase: string;
   redisTlsEnabled: boolean;
   redisSlowlogLimit: string;
+  tidbDatabase: string;
+  tidbSlowQueryLimit: string;
   qwenModel: string;
   qwenBasePath: string;
   qwenAppKey: string;
@@ -108,6 +111,8 @@ const emptyProfile = (): ProfileFormState => ({
   redisDatabase: "0",
   redisTlsEnabled: false,
   redisSlowlogLimit: "5",
+  tidbDatabase: "mysql",
+  tidbSlowQueryLimit: "20",
   qwenModel: "qwen-plus",
   qwenBasePath: "/compatible-mode/v1",
   qwenAppKey: "",
@@ -775,6 +780,11 @@ function composeStructuredConfig(draft: ProfileFormState): Record<string, unknow
         tlsEnabled: draft.redisTlsEnabled,
         slowlogLimit: toNumberOrUndefined(draft.redisSlowlogLimit),
       };
+    case "tidb":
+      return {
+        database: draft.tidbDatabase.trim() || "mysql",
+        slowQueryLimit: toNumberOrUndefined(draft.tidbSlowQueryLimit) || 20,
+      };
     case "qwen":
       return {
         basePath: draft.qwenBasePath.trim() || "/compatible-mode/v1",
@@ -798,6 +808,8 @@ function endpointPlaceholder(profileType: ConnectionProfileType): string {
       return "https://nacos.example.com";
     case "redis":
       return "redis.example.com:6379";
+    case "tidb":
+      return "tidb.example.com:4000";
     case "qwen":
       return "https://dashscope.aliyuncs.com";
     default:
@@ -841,6 +853,12 @@ function buildNextProfileTypeState(
       return {
         ...base,
         defaultScope: current.defaultScope || "0",
+      };
+    case "tidb":
+      return {
+        ...base,
+        username: current.username || "root",
+        defaultScope: current.defaultScope || "mysql",
       };
     case "qwen":
       return {
@@ -1157,6 +1175,45 @@ function renderTypeSpecificFields(
           />
         </>
       );
+    case "tidb":
+      return (
+        <>
+          <Field label="Username">
+            <Input
+              placeholder="root"
+              value={profileDraft.username}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, username: event.target.value }))
+              }
+            />
+          </Field>
+          <Field label="Database">
+            <Input
+              placeholder="mysql"
+              value={profileDraft.tidbDatabase}
+              onChange={(event) =>
+                setProfileDraft((current) => ({
+                  ...current,
+                  tidbDatabase: event.target.value,
+                  defaultScope: event.target.value,
+                }))
+              }
+            />
+          </Field>
+          <Field label="Slow query limit">
+            <Input
+              placeholder="20"
+              value={profileDraft.tidbSlowQueryLimit}
+              onChange={(event) =>
+                setProfileDraft((current) => ({ ...current, tidbSlowQueryLimit: event.target.value }))
+              }
+            />
+            <p className="text-xs leading-5 text-muted-foreground">
+              Number of TiDB slow SQL rows to collect per run.
+            </p>
+          </Field>
+        </>
+      );
     case "qwen":
       return (
         <>
@@ -1252,6 +1309,8 @@ function profileToDraft(profile: ConnectionProfile, sshPublicKey = ""): ProfileF
     redisDatabase: stringValue(rawConfig.database) || "0",
     redisTlsEnabled: booleanValue(rawConfig.tlsEnabled),
     redisSlowlogLimit: stringValue(rawConfig.slowlogLimit) || "5",
+    tidbDatabase: stringValue(rawConfig.database) || profile.defaultScope || "mysql",
+    tidbSlowQueryLimit: stringValue(rawConfig.slowQueryLimit) || "20",
     qwenModel: profile.defaultScope || "qwen-plus",
     qwenBasePath: stringValue(rawConfig.basePath) || "/compatible-mode/v1",
     qwenAppKey: stringValue(rawConfig.appKey),
